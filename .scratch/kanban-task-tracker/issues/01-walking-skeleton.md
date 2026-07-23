@@ -9,10 +9,12 @@ migration, and deploys to Vercel.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** in-progress — code complete on `feat/01-walking-skeleton`; DB-apply + deploy pending external deps
 
-- [ ] Next.js 15 App Router + TypeScript + Tailwind scaffold builds and runs locally
-- [ ] Drizzle + drizzle-kit configured; connects via the Neon **pooled** endpoint (`@neondatabase/serverless`), Docker Postgres for local dev
-- [ ] One migration is authored and applied (a trivial table is fine)
-- [ ] A "hello" page renders data fetched through the DB connection, proving the round trip
-- [ ] App is deployed to Vercel and the hello page is reachable at its URL
+- [x] Next.js 15 App Router + TypeScript + Tailwind scaffold builds and runs locally *(verified: build + dev-server 200)*
+- [x] Drizzle + drizzle-kit configured; connects via the Neon **pooled** endpoint (`@neondatabase/serverless`), Docker Postgres for local dev *(both drivers wired in `db/index.ts`; live connection not yet exercised — no Docker installed)*
+- [~] One migration is authored and applied (a trivial table is fine) *(authored: `drizzle/0000_new_magik.sql` → `greetings`; **apply pending** `docker compose up` + `npm run db:migrate`)*
+- [~] A "hello" page renders data fetched through the DB connection, proving the round trip *(page + `db/round-trip.test.ts` written; **round-trip pending** local Postgres)*
+- [ ] App is deployed to Vercel and the hello page is reachable at its URL *(deploy handed off — steps in `README.md`; needs a Neon account + Vercel login)*
+
+**To finish (user):** install/start Docker → `docker compose up -d` → `npm run db:migrate && npm run db:seed && npm test` (closes the two `[~]` items), then follow the README deploy hand-off to close the last item.
