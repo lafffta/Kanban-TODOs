@@ -9,6 +9,10 @@ out/
 build/
 dist/
 
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
 # Environment / secrets
 .env
 .env*.local
