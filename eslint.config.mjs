@@ -12,6 +12,16 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
+    rules: {
+      // Allow the "omit a field via rest destructure" idiom (e.g. stripping
+      // passwordHash to build a PublicUser) without flagging the pulled-out key.
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true },
+      ],
+    },
+  },
+  {
     ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "drizzle/**"],
   },
 ];

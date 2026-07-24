@@ -10,10 +10,10 @@ OAuth.
 
 **Blocked by:** 01 — Walking skeleton.
 
-**Status:** ready-for-agent
+**Status:** code-complete — pending review + commit
 
-- [ ] `users` table exists with `passwordHash`; sign-up creates a user with an argon2 hash
-- [ ] Sign in with correct credentials establishes a JWT session; wrong credentials are rejected
-- [ ] Sign out clears the session
-- [ ] A protected route redirects to sign-in when logged out and renders when logged in
-- [ ] Server-action / route inputs validated with Zod
+- [x] `users` table exists with `passwordHash`; sign-up creates a user with an argon2 hash
+- [x] Sign in with correct credentials establishes a JWT session; wrong credentials are rejected
+- [x] Sign out clears the session
+- [x] A protected route redirects to sign-in when logged out and renders when logged in
+- [x] Server-action / route inputs validated with Zod
