@@ -4,8 +4,7 @@ import { getBoard, listBoardMembers, requireBoardMember } from "@/db/boards";
 import { listColumns } from "@/db/columns";
 import { listCards } from "@/db/cards";
 import { redirectOnBoardDenial, requireUserId } from "./access";
-import { CreateColumnForm } from "./create-column-form";
-import { ColumnLane, type MoveTarget } from "./column-lane";
+import { BoardView } from "./board-view";
 
 // Board detail: the lanes of one board in `position` order, each holding its cards
 // in `position` order. Gated by `requireBoardMember` — a non-member is bounced back
@@ -59,32 +58,8 @@ export default async function BoardPage({
         </Link>
       </div>
 
-      <div className="flex flex-1 gap-4 overflow-x-auto pb-4">
-        {columns.map((column, i) => {
-          // Neighbours the column lands between when nudged one step. Moving left
-          // means slotting before the previous lane; moving right, after the next.
-          const moveLeft: MoveTarget =
-            i > 0
-              ? { beforeId: columns[i - 2]?.id ?? null, afterId: columns[i - 1].id }
-              : null;
-          const moveRight: MoveTarget =
-            i < columns.length - 1
-              ? { beforeId: columns[i + 1].id, afterId: columns[i + 2]?.id ?? null }
-              : null;
-          return (
-            <ColumnLane
-              key={column.id}
-              boardId={id}
-              column={column}
-              cards={visibleCards.filter((card) => card.columnId === column.id)}
-              members={members}
-              moveLeft={moveLeft}
-              moveRight={moveRight}
-            />
-          );
-        })}
-        <CreateColumnForm boardId={id} />
-      </div>
+      <BoardView boardId={id} columns={columns} cards={visibleCards} members={members} />
+
 
       {columns.length === 0 && (
         <p className="text-sm opacity-60">No columns yet. Add your first lane above.</p>

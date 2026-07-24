@@ -13,6 +13,7 @@ import {
   createCard,
   deleteCard,
   listCards,
+  moveCard,
   updateCard,
 } from "./cards";
 
@@ -209,4 +210,92 @@ test("acting on a missing card raises CardNotFoundError", async () => {
   await expect(
     updateCard({ cardId: "no-such-card", title: "X", description: "", userId: owner.id }),
   ).rejects.toBeInstanceOf(CardNotFoundError);
+});
+
+test("moveCard reorders a card within its column, touching one row", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const mk = (title: string) =>
+    createCard({ boardId: board.id, columnId: column.id, title, userId: owner.id });
+  const a = await mk("A");
+  const b = await mk("B");
+  const c = await mk("C");
+
+  // Drop C between A and B → order becomes A, C, B.
+  const moved = await moveCard({
+    cardId: c.id,
+    columnId: column.id,
+    beforeId: a.id,
+    afterId: b.id,
+    userId: owner.id,
+  });
+  expect(moved.columnId).toBe(column.id);
+  expect(a.position < moved.position && moved.position < b.position).toBe(true);
+
+  const order = (await listCards(board.id)).map((card) => card.title);
+  expect(order).toEqual(["A", "C", "B"]);
+
+  // A and B were untouched — only the moved row changed position.
+  const rows = await db.select().from(cards).where(eq(cards.boardId, board.id));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  expect(byId.get(a.id)!.position).toBe(a.position);
+  expect(byId.get(b.id)!.position).toBe(b.position);
+});
+
+test("moveCard across columns rewrites columnId and position", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const doing = await createColumn({ boardId: board.id, name: "Doing", userId: owner.id });
+  const card = await createCard({ boardId: board.id, columnId: column.id, title: "Task", userId: owner.id });
+  const anchor = await createCard({ boardId: board.id, columnId: doing.id, title: "Anchor", userId: owner.id });
+
+  // Move Task to the end of the Doing column (after Anchor).
+  const moved = await moveCard({
+    cardId: card.id,
+    columnId: doing.id,
+    beforeId: anchor.id,
+    afterId: null,
+    userId: owner.id,
+  });
+  expect(moved.columnId).toBe(doing.id);
+  expect(moved.position > anchor.position).toBe(true);
+
+  const listed = await listCards(board.id);
+  const inDoing = listed.filter((c) => c.columnId === doing.id).map((c) => c.title);
+  expect(inDoing).toEqual(["Anchor", "Task"]);
+});
+
+test("moveCard rejects a neighbour that isn't in the target column", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const doing = await createColumn({ boardId: board.id, name: "Doing", userId: owner.id });
+  const card = await createCard({ boardId: board.id, columnId: column.id, title: "Task", userId: owner.id });
+  const strayNeighbour = await createCard({ boardId: board.id, columnId: column.id, title: "Stray", userId: owner.id });
+
+  // The neighbour lives in `column`, but the move targets `doing`.
+  await expect(
+    moveCard({ cardId: card.id, columnId: doing.id, beforeId: strayNeighbour.id, afterId: null, userId: owner.id }),
+  ).rejects.toBeInstanceOf(CardNotFoundError);
+});
+
+test("moveCard rejects a target column on another board", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const otherBoard = await createBoard({ name: "Other", ownerId: owner.id });
+  const otherColumn = await createColumn({ boardId: otherBoard.id, name: "X", userId: owner.id });
+  const card = await createCard({ boardId: board.id, columnId: column.id, title: "Task", userId: owner.id });
+
+  await expect(
+    moveCard({ cardId: card.id, columnId: otherColumn.id, beforeId: null, afterId: null, userId: owner.id }),
+  ).rejects.toThrow("Column does not belong to this board.");
+
+  // The card stayed put in its original lane.
+  const [still] = await db.select().from(cards).where(eq(cards.id, card.id));
+  expect(still.columnId).toBe(column.id);
+});
+
+test("moveCard is refused for a non-member", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const outsider = await makeUser();
+  const card = await createCard({ boardId: board.id, columnId: column.id, title: "Secret", userId: owner.id });
+
+  await expect(
+    moveCard({ cardId: card.id, columnId: column.id, beforeId: null, afterId: null, userId: outsider.id }),
+  ).rejects.toMatchObject({ name: "BoardAccessError", reason: "not-a-member" });
 });

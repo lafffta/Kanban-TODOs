@@ -1,6 +1,8 @@
 "use client";
 
 import { useActionState, useEffect, useState, useTransition } from "react";
+import { useDroppable } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { Column } from "@/db/schema";
 import type { BoardMemberProfile } from "@/db/boards";
 import type { CardWithAssignee } from "@/db/cards";
@@ -44,6 +46,10 @@ export function ColumnLane({
   );
   const [isPending, startTransition] = useTransition();
   const busy = renaming || isPending;
+
+  // The lane's card area is a drop target, so a card can be dropped into an empty
+  // column (where there's no sibling card to hover) — the column id is the over id.
+  const { setNodeRef: setDropRef } = useDroppable({ id: column.id });
 
   // Close the editor once a rename settles without an error.
   useEffect(() => {
@@ -131,10 +137,15 @@ export function ColumnLane({
       {state?.error && editing && (
         <p className="px-3 pb-2 text-xs text-red-600 dark:text-red-400">{state.error}</p>
       )}
-      <div className="flex flex-1 flex-col gap-2 px-3 pb-3">
-        {cards.map((card) => (
-          <CardItem key={card.id} boardId={boardId} card={card} members={members} />
-        ))}
+      <div ref={setDropRef} className="flex flex-1 flex-col gap-2 px-3 pb-3">
+        <SortableContext
+          items={cards.map((card) => card.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          {cards.map((card) => (
+            <CardItem key={card.id} boardId={boardId} card={card} members={members} />
+          ))}
+        </SortableContext>
         {cards.length === 0 && (
           <p className="py-1 text-xs opacity-50">No cards yet.</p>
         )}

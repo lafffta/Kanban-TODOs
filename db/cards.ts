@@ -81,6 +81,20 @@ async function requireCardMember(cardId: string, userId: string): Promise<Card> 
 }
 
 /**
+ * Confirm a column belongs to a board, so a card can't be attached to — or moved
+ * into — another board's lane. Shared by create and move (the two places a card
+ * lands in a column the caller named).
+ */
+async function requireColumnInBoard(columnId: string, boardId: string): Promise<void> {
+  const [column] = await db
+    .select({ id: columns.id })
+    .from(columns)
+    .where(and(eq(columns.id, columnId), eq(columns.boardId, boardId)))
+    .limit(1);
+  if (!column) throw new Error("Column does not belong to this board.");
+}
+
+/**
  * Create a card at the end of a column's cards. Members may create cards (D1);
  * membership is checked here, and the column is confirmed to belong to the board
  * so a caller can't attach a card to another board's lane. The new key is
@@ -93,13 +107,7 @@ export async function createCard(input: {
   userId: string;
 }): Promise<Card> {
   await requireBoardMember(input.boardId, input.userId);
-
-  const [column] = await db
-    .select()
-    .from(columns)
-    .where(and(eq(columns.id, input.columnId), eq(columns.boardId, input.boardId)))
-    .limit(1);
-  if (!column) throw new Error("Column does not belong to this board.");
+  await requireColumnInBoard(input.columnId, input.boardId);
 
   const siblings = await db
     .select({ position: cards.position })
@@ -166,6 +174,57 @@ export async function assignCard(input: {
   const [updated] = await db
     .update(cards)
     .set({ assigneeId: input.assigneeId, updatedAt: new Date() })
+    .where(eq(cards.id, card.id))
+    .returning();
+  return updated;
+}
+
+/**
+ * Move a card to sit between `beforeId` and `afterId` (each a card id, or `null`
+ * for an end) inside `columnId` — the same lane for a reorder, a different lane
+ * for a cross-column move. The target column must belong to the card's board, and
+ * both neighbours must currently live in that target column, so a caller can't
+ * splice in a position from another lane or board. Generates one fractional key
+ * between the neighbours' positions (with jitter) and rewrites the single moved
+ * row — `columnId` + `position` in one update, last-write-wins with no locking
+ * (D3). Mirrors `reorderColumn`, plus the column change.
+ */
+export async function moveCard(input: {
+  cardId: string;
+  columnId: string;
+  beforeId: string | null;
+  afterId: string | null;
+  userId: string;
+}): Promise<Card> {
+  const card = await requireCardMember(input.cardId, input.userId);
+  await requireColumnInBoard(input.columnId, card.boardId);
+
+  // A neighbour's position, scoped to the target column: a card named as a drop
+  // neighbour must already sit in the lane the move lands in.
+  const neighbourPosition = async (id: string | null): Promise<string | null> => {
+    if (id === null) return null;
+    if (id === card.id) {
+      throw new Error("A card cannot be moved relative to itself.");
+    }
+    const [neighbour] = await db
+      .select({ position: cards.position })
+      .from(cards)
+      .where(and(eq(cards.id, id), eq(cards.columnId, input.columnId)))
+      .limit(1);
+    if (!neighbour) throw new CardNotFoundError(id);
+    return neighbour.position;
+  };
+
+  const before = await neighbourPosition(input.beforeId);
+  const after = await neighbourPosition(input.afterId);
+
+  const [updated] = await db
+    .update(cards)
+    .set({
+      columnId: input.columnId,
+      position: keyBetween(before, after),
+      updatedAt: new Date(),
+    })
     .where(eq(cards.id, card.id))
     .returning();
   return updated;

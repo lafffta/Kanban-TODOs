@@ -1,6 +1,8 @@
 "use client";
 
 import { useActionState, useEffect, useState, useTransition } from "react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { BoardMemberProfile } from "@/db/boards";
 import type { CardWithAssignee } from "@/db/cards";
 import { Avatar, displayName } from "./avatar";
@@ -10,6 +12,35 @@ import {
   updateCardAction,
   type CardFormState,
 } from "./actions";
+
+// Shared box styling for a card's collapsed face — reused by the interactive card
+// and by the drag overlay clone so the lifted card looks identical to its slot.
+const cardFaceBase =
+  "flex w-full items-start gap-2 rounded-xl border border-black/10 px-3 py-2 text-left dark:border-white/10";
+
+/**
+ * A card's collapsed face — title plus, when assigned, the assignee's avatar. Used
+ * for the `DragOverlay` clone; the interactive collapsed card below repeats the
+ * same content on a sortable `<button>`.
+ */
+export function CardFace({
+  card,
+  dragging = false,
+}: {
+  card: CardWithAssignee;
+  dragging?: boolean;
+}) {
+  return (
+    <div
+      className={`${cardFaceBase} bg-white dark:bg-white/[0.06] ${
+        dragging ? "cursor-grabbing shadow-lg" : "shadow-sm"
+      }`}
+    >
+      <span className="flex-1 whitespace-pre-wrap break-words text-sm">{card.title}</span>
+      {card.assignee && <Avatar user={card.assignee} />}
+    </div>
+  );
+}
 
 /**
  * One card in a lane. Collapsed it shows its title and, when assigned, the
@@ -35,6 +66,12 @@ export function CardItem({
   const [isPending, startTransition] = useTransition();
   const busy = saving || isPending;
 
+  // Drag-and-drop (ticket 06). The whole collapsed face is the drag handle; the
+  // pointer sensor's activation distance keeps a plain click opening the editor,
+  // and the touch sensor's long-press keeps a tap editing and a swipe scrolling.
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: card.id });
+
   // Close the editor once a save settles without an error.
   useEffect(() => {
     if (editing && !saving && !state) setEditing(false);
@@ -52,9 +89,17 @@ export function CardItem({
   if (!editing) {
     return (
       <button
+        ref={setNodeRef}
+        style={{
+          transform: CSS.Transform.toString(transform),
+          transition,
+          opacity: isDragging ? 0.4 : undefined,
+        }}
         type="button"
         onClick={() => setEditing(true)}
-        className="flex w-full items-start gap-2 rounded-xl border border-black/10 bg-white px-3 py-2 text-left shadow-sm transition hover:border-black/25 dark:border-white/10 dark:bg-white/[0.06] dark:hover:border-white/30"
+        className={`${cardFaceBase} bg-white shadow-sm transition hover:border-black/25 dark:bg-white/[0.06] dark:hover:border-white/30`}
+        {...attributes}
+        {...listeners}
       >
         <span className="flex-1 whitespace-pre-wrap break-words text-sm">{card.title}</span>
         {card.assignee && <Avatar user={card.assignee} />}
