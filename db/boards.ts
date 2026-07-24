@@ -1,9 +1,10 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
 import {
   boardMembers,
   boards,
+  cards,
   users,
   type Board,
   type BoardMember,
@@ -19,6 +20,27 @@ export type BoardMemberProfile = UserProfile & { role: BoardRole };
 
 /** Role ranking for `minRole` comparisons: an owner outranks a member. */
 const ROLE_RANK: Record<BoardRole, number> = { member: 1, owner: 2 };
+
+/**
+ * The rank of a stored role. `role` is a text column, so a value outside the two
+ * we know is conceivable (a bad migration, a future role); it ranks below
+ * everything rather than passing a `minRole` gate by comparing as `undefined`.
+ */
+function rankOf(role: BoardRole): number {
+  return ROLE_RANK[role] ?? 0;
+}
+
+/**
+ * Zod shape for a role arriving from a client — the boundary check for the invite
+ * and role-change actions, which would otherwise write an arbitrary string into
+ * the `role` text column.
+ */
+export const boardRoleSchema = z.enum(["owner", "member"]);
+
+/** The "this user's row on this board" predicate every membership query needs. */
+export function membershipOf(boardId: string, userId: string): SQL | undefined {
+  return and(eq(boardMembers.boardId, boardId), eq(boardMembers.userId, userId));
+}
 
 export type BoardAccessReason = "not-a-member" | "insufficient-role";
 
@@ -119,14 +141,100 @@ export async function requireBoardMember(
   const [membership] = await db
     .select()
     .from(boardMembers)
-    .where(and(eq(boardMembers.boardId, boardId), eq(boardMembers.userId, userId)))
+    .where(membershipOf(boardId, userId))
     .limit(1);
 
   if (!membership) {
     throw new BoardAccessError("not-a-member", boardId, userId);
   }
-  if (ROLE_RANK[membership.role] < ROLE_RANK[minRole]) {
+  if (rankOf(membership.role) < rankOf(minRole)) {
     throw new BoardAccessError("insufficient-role", boardId, userId);
   }
   return membership;
+}
+
+/** Why a membership change was refused — distinct from *who* may make it. */
+export type MembershipRejection = "not-a-member" | "board-creator";
+
+/**
+ * Thrown when an owner's membership change can't be applied to its target: the
+ * target isn't a member, or it's the board's creator, whose owner row is what
+ * guarantees the board always has someone who can govern it (D5 — no ownership
+ * transfer in v1). Distinct from `BoardAccessError`, which is about the *caller*.
+ */
+export class MembershipError extends Error {
+  constructor(
+    readonly reason: MembershipRejection,
+    readonly boardId: string,
+    readonly userId: string,
+  ) {
+    super(`Membership change refused (${reason}) for user ${userId} on board ${boardId}`);
+    this.name = "MembershipError";
+  }
+}
+
+/**
+ * Confirm an owner-only membership change may target this user: the caller must
+ * own the board, the target must currently be a member, and the target must not be
+ * the board's creator. Shared by remove and role-change so the two can't drift.
+ */
+async function requireManageableMember(input: {
+  boardId: string;
+  userId: string;
+  actorId: string;
+}): Promise<void> {
+  await requireBoardMember(input.boardId, input.actorId, "owner");
+
+  const board = await getBoard(input.boardId);
+  if (board?.ownerId === input.userId) {
+    throw new MembershipError("board-creator", input.boardId, input.userId);
+  }
+
+  const [target] = await db
+    .select({ userId: boardMembers.userId })
+    .from(boardMembers)
+    .where(membershipOf(input.boardId, input.userId))
+    .limit(1);
+  if (!target) throw new MembershipError("not-a-member", input.boardId, input.userId);
+}
+
+/**
+ * Remove a member from a board (owner-only, D1). Their cards and comments stay —
+ * the board keeps its history (D5) — but their card *assignments* are cleared in
+ * the same transaction, since `assignCard` only ever accepts a current member and a
+ * stale assignee would show a non-member's avatar on the board.
+ */
+export async function removeMember(input: {
+  boardId: string;
+  userId: string;
+  actorId: string;
+}): Promise<void> {
+  await requireManageableMember(input);
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(cards)
+      .set({ assigneeId: null })
+      .where(and(eq(cards.boardId, input.boardId), eq(cards.assigneeId, input.userId)));
+    await tx.delete(boardMembers).where(membershipOf(input.boardId, input.userId));
+  });
+}
+
+/**
+ * Change a member's role (owner-only, D1) — promote a member to co-owner or demote
+ * one back. The board's creator is not a valid target, so a board can never be left
+ * without an owner.
+ */
+export async function changeMemberRole(input: {
+  boardId: string;
+  userId: string;
+  role: BoardRole;
+  actorId: string;
+}): Promise<void> {
+  await requireManageableMember(input);
+
+  await db
+    .update(boardMembers)
+    .set({ role: input.role })
+    .where(membershipOf(input.boardId, input.userId));
 }

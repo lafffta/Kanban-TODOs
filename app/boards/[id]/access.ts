@@ -1,17 +1,9 @@
 import { redirect } from "next/navigation";
-import { auth } from "@/auth";
 import { BoardAccessError } from "@/db/boards";
 
-// Shared board-access plumbing for the board detail page and its server actions,
-// so "where a signed-out user goes" and "where a denied member lands" each live
-// in exactly one place.
-
-/** The signed-in user's id, or a redirect to sign-in. */
-export async function requireUserId(): Promise<string> {
-  const session = await auth();
-  if (!session?.user?.id) redirect("/sign-in");
-  return session.user.id;
-}
+// Board-access plumbing for the board detail page and its server actions, so
+// "where a denied member lands" lives in exactly one place. Who the signed-in user
+// is — and where a signed-out one goes — is `@/app/session`.
 
 /**
  * Run board-scoped work, sending a denied member back to their boards list.

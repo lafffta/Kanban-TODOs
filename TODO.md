@@ -5,8 +5,8 @@ with a second account, which no test in `vitest run` can cover.
 
 ## Manual demo steps
 
-These two acceptance criteria are the only ones left unchecked across tickets 01–07.
-Both tickets are code-complete and merged; these are hands-on verification gates.
+These three acceptance criteria are the only ones left unchecked across tickets
+01–08. All three tickets are code-complete; these are hands-on verification gates.
 
 ### 1. Ticket 06 — move a task on a phone
 
@@ -47,10 +47,34 @@ What to check:
 - Removing a member leaves their comments in place, attributed to "former member"
   (`authorId` is `ON DELETE SET NULL`).
 
+### 3. Ticket 08 — invite a teammate
+
+> `- [ ] Invite a teammate; they join and can comment (demo)` — `.scratch/kanban-task-tracker/issues/08-sharing-invites.md`
+
+Needs a second account (or a fresh email you can sign up with) in another browser
+profile. The flow was exercised end to end against a running server, but not by two
+people on two devices.
+
+What to check:
+
+- As owner, open **Members** on a board, enter the teammate's email + role, and copy
+  the minted link. Send it out-of-band — there's no email infrastructure (D2).
+- Opening the link **while signed out** lands on sign-in with the invite carried in
+  `?next=`; creating a brand-new account from there comes straight back to the
+  accept screen. Signing in as the invited address and accepting joins the board.
+- **Accepting on the wrong account is refused** with "This invite was sent to a
+  different email address" — the invite is email-bound (D2).
+- The **link is single-use and expires in 7 days**; re-opening it after accepting
+  says "You're already in" rather than erroring (idempotent).
+- The teammate can then open a card and **comment** — which is also the second
+  account ticket 07's demo needs.
+- As owner, **change their role and remove them**. Removing clears any cards they
+  were assigned; their comments stay.
+
 ## Notes
 
 - There is no live deployment to run these against right now. The app targets
   **Vercel + Neon** in production (see `.env.example`); a local run needs a Postgres
   on `DATABASE_URL` and `npm run db:migrate` before `npm run dev`.
-- Once both demos pass, tick the boxes in the two ticket files above and this file
+- Once all three demos pass, tick the boxes in the ticket files above and this file
   can go away.

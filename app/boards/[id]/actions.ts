@@ -24,11 +24,28 @@ import {
   CommentNotFoundError,
   CommentPermissionError,
 } from "@/db/comments";
-import { redirectOnBoardDenial, requireUserId } from "./access";
+import {
+  MembershipError,
+  boardRoleSchema,
+  changeMemberRole,
+  removeMember,
+} from "@/db/boards";
+import type { BoardRole } from "@/db/schema";
+import {
+  INVITE_REJECTION_MESSAGE,
+  InviteError,
+  createInvite,
+  createInviteSchema,
+} from "@/db/invites";
+import { requireUserId } from "@/app/session";
+import { redirectOnBoardDenial } from "./access";
 
 export type ColumnFormState = { error: string } | undefined;
 export type CardFormState = { error: string } | undefined;
 export type CommentFormState = { error: string } | undefined;
+export type MemberFormState = { error: string } | undefined;
+/** A minted invite's token, or why one wasn't minted — read as `result?.error`. */
+export type InviteFormState = { error?: string; token?: string } | undefined;
 
 /** Create a column at the end of a board's lanes (member-permitted). */
 export async function createColumnAction(
@@ -239,6 +256,101 @@ export async function deleteCommentAction(input: {
     }
     if (error instanceof CommentNotFoundError) {
       return { error: "That comment was already deleted." };
+    }
+    throw error;
+  }
+  revalidatePath(`/boards/${input.boardId}`);
+}
+
+/** What a refused membership change means to the owner who attempted it. */
+const MEMBERSHIP_MESSAGE: Record<MembershipError["reason"], string> = {
+  "not-a-member": "They're no longer a member of this board.",
+  "board-creator": "The board's creator can't be removed or have their role changed.",
+};
+
+/**
+ * Mint an invite to this board (owner-only, enforced in the db layer — a member is
+ * redirected away like any other denied board action). Returns the token so the
+ * panel can show the owner a link to share out-of-band; there is no email
+ * infrastructure in v1 (D2).
+ */
+export async function createInviteAction(input: {
+  boardId: string;
+  email: string;
+  role: BoardRole;
+}): Promise<InviteFormState> {
+  const userId = await requireUserId();
+  const parsed = createInviteSchema.safeParse({ email: input.email, role: input.role });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid invite." };
+  }
+
+  let token: string;
+  try {
+    ({ token } = await redirectOnBoardDenial(() =>
+      createInvite({
+        boardId: input.boardId,
+        email: parsed.data.email,
+        role: parsed.data.role,
+        userId,
+      }),
+    ));
+  } catch (error) {
+    if (error instanceof InviteError) {
+      return { error: INVITE_REJECTION_MESSAGE[error.reason] };
+    }
+    throw error;
+  }
+  revalidatePath(`/boards/${input.boardId}`);
+  return { token };
+}
+
+/**
+ * Remove a member from the board (owner-only). A refusal the panel couldn't
+ * foresee — the target left already, or is the board's creator — comes back as a
+ * message rather than a 500.
+ */
+export async function removeMemberAction(input: {
+  boardId: string;
+  userId: string;
+}): Promise<MemberFormState> {
+  const actorId = await requireUserId();
+  try {
+    await redirectOnBoardDenial(() =>
+      removeMember({ boardId: input.boardId, userId: input.userId, actorId }),
+    );
+  } catch (error) {
+    if (error instanceof MembershipError) {
+      return { error: MEMBERSHIP_MESSAGE[error.reason] };
+    }
+    throw error;
+  }
+  revalidatePath(`/boards/${input.boardId}`);
+}
+
+/** Change a member's role (owner-only). Same refusals as removal. */
+export async function changeMemberRoleAction(input: {
+  boardId: string;
+  userId: string;
+  role: BoardRole;
+}): Promise<MemberFormState> {
+  const actorId = await requireUserId();
+  // The role arrives from a client and lands in a text column — parse it, never
+  // trust the cast on the other side of the wire.
+  const parsed = boardRoleSchema.safeParse(input.role);
+  if (!parsed.success) return { error: "That isn't a role on this board." };
+  try {
+    await redirectOnBoardDenial(() =>
+      changeMemberRole({
+        boardId: input.boardId,
+        userId: input.userId,
+        role: parsed.data,
+        actorId,
+      }),
+    );
+  } catch (error) {
+    if (error instanceof MembershipError) {
+      return { error: MEMBERSHIP_MESSAGE[error.reason] };
     }
     throw error;
   }

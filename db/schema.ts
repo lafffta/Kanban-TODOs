@@ -213,3 +213,35 @@ export const comments = pgTable("comments", {
 
 export type Comment = typeof comments.$inferSelect;
 export type NewComment = typeof comments.$inferInsert;
+
+/**
+ * A pending or accepted invitation to a board (D2). The owner mints one per
+ * invitee with a crypto-random `token` — the trust boundary (D6): unguessable,
+ * single-use (`acceptedAt` stamps it spent) and expiring (`expiresAt`, 7 days).
+ * `email` is stored lowercased and is matched case-insensitively against the
+ * accepting user's address; because v1 has no email verification, that binding is
+ * a guardrail against accepting on the wrong account, not the security boundary.
+ * `role` is the membership the accept mints. Deleting the board cascades its
+ * invites (D5); `invitedById` is `ON DELETE SET NULL` so an invite outlives the
+ * account that sent it.
+ */
+export const boardInvites = pgTable("board_invites", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  boardId: text("board_id")
+    .notNull()
+    .references(() => boards.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  token: text("token").notNull().unique(),
+  role: text("role").$type<BoardRole>().notNull(),
+  invitedById: text("invited_by_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type BoardInvite = typeof boardInvites.$inferSelect;
+export type NewBoardInvite = typeof boardInvites.$inferInsert;
