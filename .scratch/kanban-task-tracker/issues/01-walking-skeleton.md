@@ -9,12 +9,12 @@ migration, and deploys to Vercel.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** in-progress — local slice complete & verified on `feat/01-walking-skeleton`; only the Vercel deploy remains (handed off)
+**Status:** ✅ done — deployed & verified end to end on `main` (merged from `feat/01-walking-skeleton`)
 
 - [x] Next.js 15 App Router + TypeScript + Tailwind scaffold builds and runs locally *(verified: build + dev-server 200)*
-- [x] Drizzle + drizzle-kit configured; connects via the Neon **pooled** endpoint (`@neondatabase/serverless`), Docker Postgres for local dev *(both drivers wired in `db/index.ts`; local `pg` driver exercised live against Docker Postgres 16)*
-- [x] One migration is authored and applied (a trivial table is fine) *(authored: `drizzle/0000_new_magik.sql` → `greetings`; applied via `npm run db:migrate` — "migrations applied successfully")*
-- [x] A "hello" page renders data fetched through the DB connection, proving the round trip *(round-trip test green — 1 passed; prod build serves the greeting live: "✅ Fetched from Postgres — the pipe works end to end.")*
-- [ ] App is deployed to Vercel and the hello page is reachable at its URL *(deploy handed off — steps in `README.md`; needs a Neon account + Vercel login)*
+- [x] Drizzle + drizzle-kit configured; connects via the Neon **pooled** endpoint (`@neondatabase/serverless`), Docker Postgres for local dev *(both drivers wired in `db/index.ts`; local `pg` driver exercised live against Docker Postgres 16, Neon pooled serverless path verified in prod)*
+- [x] One migration is authored and applied (a trivial table is fine) *(authored: `drizzle/0000_new_magik.sql` → `greetings`; applied to Docker locally and to Neon via `npm run db:migrate`)*
+- [x] A "hello" page renders data fetched through the DB connection, proving the round trip *(round-trip test green — 1 passed; prod page serves the greeting live: "✅ Fetched from Postgres — the pipe works end to end.")*
+- [x] App is deployed to Vercel and the hello page is reachable at its URL *(live at https://kanban-task-tracker-kohl.vercel.app — HTTP 200, renders "Hello from Postgres 👋" from Neon; Vercel project `aidan18/kanban-task-tracker`, Node 22.x, `DATABASE_DRIVER=neon` + pooled `DATABASE_URL`)*
 
-**To finish (user):** follow the README "Deploying to Vercel (hand-off)" section (Neon pooled URL + Vercel import) to close the last item.
+**Complete** — all acceptance criteria met; the pipe is proven browser → Vercel → Neon Postgres and back.
