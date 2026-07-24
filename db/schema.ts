@@ -80,3 +80,48 @@ export const verificationTokens = pgTable(
   },
   (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })],
 );
+
+/** A member's role on a board (D1). Owners govern; members do all content work. */
+export type BoardRole = "owner" | "member";
+
+/**
+ * A kanban board. `ownerId` is the creating user; the matching `owner` row in
+ * `board_members` is the source of truth for access control (see
+ * `requireBoardMember`). Deleting a board cascades everything (D5).
+ */
+export const boards = pgTable("boards", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Board = typeof boards.$inferSelect;
+export type NewBoard = typeof boards.$inferInsert;
+
+/**
+ * A user's membership of a board, carrying their `role`. Composite PK
+ * (`boardId + userId`) makes membership unique per board. Every board-scoped read
+ * and mutation is gated by looking a row up here via `requireBoardMember`.
+ */
+export const boardMembers = pgTable(
+  "board_members",
+  {
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").$type<BoardRole>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (bm) => [primaryKey({ columns: [bm.boardId, bm.userId] })],
+);
+
+export type BoardMember = typeof boardMembers.$inferSelect;
+export type NewBoardMember = typeof boardMembers.$inferInsert;
