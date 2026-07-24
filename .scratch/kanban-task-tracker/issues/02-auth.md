@@ -10,7 +10,7 @@ OAuth.
 
 **Blocked by:** 01 — Walking skeleton.
 
-**Status:** code-complete — pending review + commit
+**Status:** done — merged to `main` (commit `b6d481e`)
 
 - [x] `users` table exists with `passwordHash`; sign-up creates a user with an argon2 hash
 - [x] Sign in with correct credentials establishes a JWT session; wrong credentials are rejected

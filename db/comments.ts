@@ -1,17 +1,8 @@
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
-import { requireBoardMember } from "./boards";
-import { CardNotFoundError } from "./cards";
-import {
-  cards,
-  comments,
-  users,
-  type BoardMember,
-  type Card,
-  type Comment,
-  type UserProfile,
-} from "./schema";
+import { requireCardMember } from "./cards";
+import { comments, users, type Comment, type UserProfile } from "./schema";
 
 /** Zod shape for a comment's body — the boundary check for posting a comment. */
 export const commentBodySchema = z.object({
@@ -44,23 +35,6 @@ export class CommentPermissionError extends Error {
 
 /** A comment plus its resolved author profile (null for a former member). */
 export type CommentWithAuthor = Comment & { author: UserProfile | null };
-
-/**
- * Load a card and confirm the caller may act on its board, returning both the card
- * and the caller's membership (so a delete can read their role). Every comment read
- * and mutation funnels through here, so membership is checked in exactly one place
- * (the `requireBoardMember` seam). Throws `BoardAccessError` for a non-member,
- * `CardNotFoundError` if the card is gone.
- */
-async function requireCardBoard(
-  cardId: string,
-  userId: string,
-): Promise<{ card: Card; membership: BoardMember }> {
-  const [card] = await db.select().from(cards).where(eq(cards.id, cardId)).limit(1);
-  if (!card) throw new CardNotFoundError(cardId);
-  const membership = await requireBoardMember(card.boardId, userId);
-  return { card, membership };
-}
 
 /**
  * A card's comments in `createdAt` order (id breaks any same-instant tie), each
@@ -96,7 +70,7 @@ export async function addComment(input: {
   body: string;
   userId: string;
 }): Promise<Comment> {
-  await requireCardBoard(input.cardId, input.userId);
+  await requireCardMember(input.cardId, input.userId);
   const [comment] = await db
     .insert(comments)
     .values({ cardId: input.cardId, authorId: input.userId, body: input.body })
@@ -122,7 +96,7 @@ export async function deleteComment(input: {
     .limit(1);
   if (!comment) throw new CommentNotFoundError(input.commentId);
 
-  const { membership } = await requireCardBoard(comment.cardId, input.userId);
+  const { membership } = await requireCardMember(comment.cardId, input.userId);
 
   const isAuthor = comment.authorId === input.userId;
   const isOwner = membership.role === "owner";

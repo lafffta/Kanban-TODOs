@@ -9,10 +9,11 @@ comment count.
 
 **Blocked by:** 06 — Drag & drop cards.
 
-**Status:** ready-for-agent
+**Status:** code done — merged to `main` (PR #5). The two-users-discuss demo below is
+still outstanding — see `TODO.md`.
 
-- [ ] Add a plain-text comment on a card (membership-checked, Zod-validated)
-- [ ] Card detail lists comments; card face shows a comment count
-- [ ] Author can delete their own comment; owner can delete any; a member cannot delete others' comments
-- [ ] `authorId` is `ON DELETE SET NULL` so a removed member's comments survive as "former member"
+- [x] Add a plain-text comment on a card (membership-checked, Zod-validated)
+- [x] Card detail lists comments; card face shows a comment count
+- [x] Author can delete their own comment; owner can delete any; a member cannot delete others' comments
+- [x] `authorId` is `ON DELETE SET NULL` so a removed member's comments survive as "former member"
 - [ ] Two users discuss a card (demo)

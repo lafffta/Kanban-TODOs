@@ -72,13 +72,22 @@ export function BoardView({
   members,
   currentUserId,
   isOwner,
+  filterAssigneeId,
 }: {
   boardId: string;
   columns: Column[];
+  /**
+   * *Every* card on the board, not just the visible ones — ordering has to be
+   * computed against the full lane. Filtering happens at render (`filterAssigneeId`)
+   * so a drop between two visible cards still resolves its true neighbours, which
+   * may be filtered-out cards sitting in the gap.
+   */
   cards: CardWithAssignee[];
   members: BoardMemberProfile[];
   currentUserId: string;
   isOwner: boolean;
+  /** When set, only this user's assigned cards are shown ("my cards", ?mine=1). */
+  filterAssigneeId: string | null;
 }) {
   const byId = useMemo(() => {
     const map = new Map<string, CardWithAssignee>();
@@ -88,15 +97,21 @@ export function BoardView({
 
   const [lanes, setLanes] = useState<Lanes>(() => groupByColumn(columns, cards));
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
+  const [isMoving, startTransition] = useTransition();
 
-  // Re-sync to the server's order whenever it changes and no drag is in flight —
+  // Re-sync to the server's order whenever it changes and nothing is in flight —
   // the authoritative positions land here after each `moveCardAction` revalidates.
+  //
+  // `isMoving` matters as much as `activeId`: drag end clears `activeId` *before*
+  // the move has been persisted, so gating on the drag alone would re-run this with
+  // the pre-move `cards` still in props and visibly snap the card back to its old
+  // slot until revalidation landed. The transition stays pending until the new
+  // server data arrives, which is exactly the window we must not re-sync in.
   const signature = laneSignature(cards);
   useEffect(() => {
-    if (!activeId) setLanes(groupByColumn(columns, cards));
+    if (!activeId && !isMoving) setLanes(groupByColumn(columns, cards));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, activeId]);
+  }, [signature, activeId, isMoving]);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -104,6 +119,14 @@ export function BoardView({
       activationConstraint: { delay: 250, tolerance: 5 },
     }),
   );
+
+  /**
+   * Whether a card shows under the current filter. Lanes always hold every card so
+   * neighbour lookup stays correct; only rendering narrows.
+   */
+  function isVisible(card: CardWithAssignee): boolean {
+    return filterAssigneeId === null || card.assigneeId === filterAssigneeId;
+  }
 
   /** Which lane a draggable id sits in — a card id, or a column id used as an empty drop target. */
   function laneOf(id: string): string | undefined {
@@ -212,7 +235,7 @@ export function BoardView({
               key={column.id}
               boardId={boardId}
               column={column}
-              cards={lanes[column.id] ?? []}
+              cards={(lanes[column.id] ?? []).filter(isVisible)}
               members={members}
               currentUserId={currentUserId}
               isOwner={isOwner}

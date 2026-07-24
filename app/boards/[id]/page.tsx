@@ -33,10 +33,9 @@ export default async function BoardPage({
     listBoardMembers(id),
   ]);
 
+  // The filter is applied inside `BoardView` at render, not here: it needs every
+  // card to resolve a drop's true neighbours, which may be cards the filter hides.
   const onlyMine = mine === "1";
-  const visibleCards = onlyMine
-    ? allCards.filter((card) => card.assigneeId === userId)
-    : allCards;
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-6">
@@ -62,10 +61,11 @@ export default async function BoardPage({
       <BoardView
         boardId={id}
         columns={columns}
-        cards={visibleCards}
+        cards={allCards}
         members={members}
         currentUserId={userId}
         isOwner={isOwner}
+        filterAssigneeId={onlyMine ? userId : null}
       />
 
 
