@@ -3,14 +3,19 @@
 import { AuthError } from "next-auth";
 import { signIn } from "@/auth";
 import { createAccount } from "@/db/auth";
+import { safeRedirectPath } from "./safe-redirect";
 
 export type AuthActionState = { error: string } | undefined;
 
 const PROTECTED_HOME = "/boards";
 
 /**
- * Sign in via the Credentials provider, redirecting to the protected home on
- * success. `signIn` with `redirectTo` throws NEXT_REDIRECT on success (which must
+ * Sign in via the Credentials provider, then land on the form's `next` target —
+ * the protected home unless the user arrived from somewhere that wants them back
+ * (an invite link, D2). The target is user input, so it's filtered through
+ * `safeRedirectPath` before it reaches `redirectTo`.
+ *
+ * `signIn` with `redirectTo` throws NEXT_REDIRECT on success (which must
  * propagate); a failed credential check throws an `AuthError` of type
  * `CredentialsSignin`, which we turn into `failureMessage`. Any other error
  * (e.g. a misconfiguration) is rethrown rather than masked.
@@ -19,9 +24,14 @@ async function attemptSignIn(
   email: FormDataEntryValue | null,
   password: FormDataEntryValue | null,
   failureMessage: string,
+  next: FormDataEntryValue | null,
 ): Promise<AuthActionState> {
   try {
-    await signIn("credentials", { email, password, redirectTo: PROTECTED_HOME });
+    await signIn("credentials", {
+      email,
+      password,
+      redirectTo: safeRedirectPath(next, PROTECTED_HOME),
+    });
   } catch (err) {
     if (err instanceof AuthError && err.type === "CredentialsSignin") {
       return { error: failureMessage };
@@ -50,6 +60,7 @@ export async function signUpAction(
     email,
     password,
     "Account created, but sign-in failed. Please sign in.",
+    formData.get("next"),
   );
 }
 
@@ -62,5 +73,6 @@ export async function signInAction(
     formData.get("email"),
     formData.get("password"),
     "Invalid email or password.",
+    formData.get("next"),
   );
 }

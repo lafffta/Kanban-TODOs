@@ -17,6 +17,7 @@ export function AuthForm({
   action,
   submitLabel,
   showName = false,
+  next,
   footer,
 }: {
   title: string;
@@ -24,6 +25,8 @@ export function AuthForm({
   action: AuthAction;
   submitLabel: string;
   showName?: boolean;
+  /** Where to land after authenticating — an invite link, when one sent us here. */
+  next?: string;
   footer: React.ReactNode;
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
@@ -38,6 +41,8 @@ export function AuthForm({
           <h1 className="text-2xl font-semibold">{title}</h1>
           <p className="mt-1 text-sm opacity-60">{subtitle}</p>
         </div>
+
+        {next && <input type="hidden" name="next" value={next} />}
 
         {showName && (
           <input

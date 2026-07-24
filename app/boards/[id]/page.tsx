@@ -3,8 +3,11 @@ import { redirect } from "next/navigation";
 import { getBoard, listBoardMembers, requireBoardMember } from "@/db/boards";
 import { listColumns } from "@/db/columns";
 import { listCards } from "@/db/cards";
-import { redirectOnBoardDenial, requireUserId } from "./access";
+import { listPendingInvites } from "@/db/invites";
+import { requireUserId } from "@/app/session";
+import { redirectOnBoardDenial } from "./access";
 import { BoardView } from "./board-view";
+import { MembersPanel } from "./members-panel";
 
 // Board detail: the lanes of one board in `position` order, each holding its cards
 // in `position` order. Gated by `requireBoardMember` — a non-member is bounced back
@@ -33,6 +36,9 @@ export default async function BoardPage({
     listBoardMembers(id),
   ]);
 
+  // Invite tokens are owner-only, so a member's page never carries them (ticket 08).
+  const invites = isOwner ? await listPendingInvites(id, userId) : [];
+
   // The filter is applied inside `BoardView` at render, not here: it needs every
   // card to resolve a drop's true neighbours, which may be cards the filter hides.
   const onlyMine = mine === "1";
@@ -57,6 +63,21 @@ export default async function BoardPage({
           {onlyMine ? "Showing my cards" : "My cards"}
         </Link>
       </div>
+
+      <MembersPanel
+        boardId={id}
+        members={members}
+        invites={invites.map((invite) => ({
+          id: invite.id,
+          email: invite.email,
+          role: invite.role,
+          token: invite.token,
+          expiresAt: invite.expiresAt.toISOString(),
+        }))}
+        creatorId={board.ownerId}
+        currentUserId={userId}
+        isOwner={isOwner}
+      />
 
       <BoardView
         boardId={id}

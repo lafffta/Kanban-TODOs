@@ -5,16 +5,22 @@ import { registerUser } from "./auth";
 import { boardMembers } from "./schema";
 import {
   BoardAccessError,
+  changeMemberRole,
   createBoard,
+  listBoardMembers,
   listBoardsForUser,
+  removeMember,
   requireBoardMember,
 } from "./boards";
+import { createColumn } from "./columns";
+import { assignCard, createCard, listCards } from "./cards";
 
 // Boards + membership integration test: proves creating a board makes the creator
 // an `owner` member, that board listing is scoped to membership (two users each
-// see only their own), and that the `requireBoardMember` access-control seam
-// admits members, refuses non-members, and enforces `minRole`. Requires the
-// Docker Postgres from docker-compose.yml.
+// see only their own), that the `requireBoardMember` access-control seam admits
+// members, refuses non-members, and enforces `minRole`, and that owner-only
+// membership management (remove, change role) holds the board's creator in place.
+// Requires the Docker Postgres from docker-compose.yml.
 
 beforeAll(async () => {
   await migrate(db, { migrationsFolder: "./drizzle" });
@@ -98,4 +104,125 @@ test("a plain member does not satisfy an owner-only requirement", async () => {
   await expect(
     requireBoardMember(board.id, member.id, "owner"),
   ).rejects.toMatchObject({ reason: "insufficient-role" });
+});
+
+test("an owner removes a member, and their assignments are cleared", async () => {
+  const owner = await makeUser();
+  const member = await makeUser();
+  const board = await createBoard({ name: "Team", ownerId: owner.id });
+  await db
+    .insert(boardMembers)
+    .values({ boardId: board.id, userId: member.id, role: "member" });
+
+  const column = await createColumn({ boardId: board.id, name: "To Do", userId: owner.id });
+  const card = await createCard({
+    boardId: board.id,
+    columnId: column.id,
+    title: "Theirs",
+    userId: owner.id,
+  });
+  await assignCard({ cardId: card.id, assigneeId: member.id, userId: owner.id });
+
+  await removeMember({ boardId: board.id, userId: member.id, actorId: owner.id });
+
+  await expect(requireBoardMember(board.id, member.id)).rejects.toMatchObject({
+    reason: "not-a-member",
+  });
+  expect((await listBoardMembers(board.id)).map((m) => m.id)).toEqual([owner.id]);
+  // A non-member can't stay assigned to the board's work.
+  const [remaining] = await listCards(board.id);
+  expect(remaining.assigneeId).toBeNull();
+});
+
+test("an owner changes a member's role", async () => {
+  const owner = await makeUser();
+  const member = await makeUser();
+  const board = await createBoard({ name: "Team", ownerId: owner.id });
+  await db
+    .insert(boardMembers)
+    .values({ boardId: board.id, userId: member.id, role: "member" });
+
+  await changeMemberRole({
+    boardId: board.id,
+    userId: member.id,
+    role: "owner",
+    actorId: owner.id,
+  });
+  expect((await requireBoardMember(board.id, member.id, "owner")).role).toBe("owner");
+
+  await changeMemberRole({
+    boardId: board.id,
+    userId: member.id,
+    role: "member",
+    actorId: owner.id,
+  });
+  expect((await requireBoardMember(board.id, member.id)).role).toBe("member");
+});
+
+test("a member cannot remove anyone or change a role", async () => {
+  const owner = await makeUser();
+  const member = await makeUser();
+  const other = await makeUser();
+  const board = await createBoard({ name: "Team", ownerId: owner.id });
+  for (const user of [member, other]) {
+    await db
+      .insert(boardMembers)
+      .values({ boardId: board.id, userId: user.id, role: "member" });
+  }
+
+  const denied = { name: "BoardAccessError", reason: "insufficient-role" };
+  await expect(
+    removeMember({ boardId: board.id, userId: other.id, actorId: member.id }),
+  ).rejects.toMatchObject(denied);
+  await expect(
+    changeMemberRole({
+      boardId: board.id,
+      userId: other.id,
+      role: "owner",
+      actorId: member.id,
+    }),
+  ).rejects.toMatchObject(denied);
+  expect(await listBoardMembers(board.id)).toHaveLength(3);
+});
+
+test("the board's creator can be neither removed nor demoted", async () => {
+  const owner = await makeUser();
+  const coOwner = await makeUser();
+  const board = await createBoard({ name: "Team", ownerId: owner.id });
+  await db
+    .insert(boardMembers)
+    .values({ boardId: board.id, userId: coOwner.id, role: "owner" });
+
+  const refused = { name: "MembershipError", reason: "board-creator" };
+  await expect(
+    removeMember({ boardId: board.id, userId: owner.id, actorId: coOwner.id }),
+  ).rejects.toMatchObject(refused);
+  await expect(
+    changeMemberRole({
+      boardId: board.id,
+      userId: owner.id,
+      role: "member",
+      actorId: owner.id,
+    }),
+  ).rejects.toMatchObject(refused);
+  expect((await requireBoardMember(board.id, owner.id, "owner")).role).toBe("owner");
+});
+
+test("managing someone who isn't a member is refused", async () => {
+  const owner = await makeUser();
+  const outsider = await makeUser();
+  const board = await createBoard({ name: "Team", ownerId: owner.id });
+
+  const refused = { name: "MembershipError", reason: "not-a-member" };
+  await expect(
+    removeMember({ boardId: board.id, userId: outsider.id, actorId: owner.id }),
+  ).rejects.toMatchObject(refused);
+  await expect(
+    changeMemberRole({
+      boardId: board.id,
+      userId: outsider.id,
+      role: "member",
+      actorId: owner.id,
+    }),
+  ).rejects.toMatchObject(refused);
 });

@@ -50,6 +50,13 @@
       "when": 1784911117664,
       "tag": "0006_crazy_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784924346036,
+      "tag": "0007_silky_layla_miller",
+      "breakpoints": true
     }
   ]
 }
