@@ -57,6 +57,13 @@ export async function createBoard(input: {
   });
 }
 
+/** A board by id, or null if it doesn't exist. Access is gated separately by
+ * `requireBoardMember`; this is the plain row lookup callers use after that. */
+export async function getBoard(boardId: string): Promise<Board | null> {
+  const [board] = await db.select().from(boards).where(eq(boards.id, boardId)).limit(1);
+  return board ?? null;
+}
+
 /** Boards the user is a member of, newest first. */
 export async function listBoardsForUser(userId: string): Promise<Board[]> {
   const rows = await db
