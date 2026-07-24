@@ -12,10 +12,10 @@ must be a member of the same board. Adds the `cards` table (`boardId`, `columnId
 
 **Blocked by:** 04 — Columns.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Create / edit (title + description) / delete a card; delete cascades its comments
-- [ ] Card gets a fractional-index `position` within its column on create
-- [ ] Assign an optional single member via `assigneeId`; assignment rejected if assignee isn't a board member
-- [ ] Card face shows title + assignee avatar; "my cards" filter works
-- [ ] `createdById` is `ON DELETE SET NULL` so a removed member's cards survive as "former member"
+- [x] Create / edit (title + description) / delete a card; delete cascades its comments
+- [x] Card gets a fractional-index `position` within its column on create
+- [x] Assign an optional single member via `assigneeId`; assignment rejected if assignee isn't a board member
+- [x] Card face shows title + assignee avatar; "my cards" filter works
+- [x] `createdById` is `ON DELETE SET NULL` so a removed member's cards survive as "former member"

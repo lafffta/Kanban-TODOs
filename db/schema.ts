@@ -37,6 +37,13 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 
 /**
+ * The public display projection of a user — the id plus the fields needed to
+ * render them (avatar image + label). Shared by card assignees and board-member
+ * listings so every surface renders a person through one shape.
+ */
+export type UserProfile = Pick<User, "id" | "name" | "email" | "image">;
+
+/**
  * Auth.js adapter tables (canonical Drizzle shapes). Reserved for future OAuth —
  * the v1 Credentials + JWT flow doesn't write to them, but the adapter requires
  * them to exist.
@@ -146,3 +153,39 @@ export const columns = pgTable("columns", {
 
 export type Column = typeof columns.$inferSelect;
 export type NewColumn = typeof columns.$inferInsert;
+
+/**
+ * A task card living in one column. `position` is a fractional-index string (D3),
+ * so cards render by `ORDER BY position` and a reorder rewrites one row (reorder
+ * lands in the cards-drag ticket). `description` is plain multiline text — no
+ * markdown, so no HTML-sanitization surface (D7). `assigneeId` is an optional
+ * single board member (validated on assignment); `createdById` is `ON DELETE SET
+ * NULL` so a removed member's cards survive as "former member" (D5). Deleting the
+ * board or the parent column cascades the card; deleting a card cascades its
+ * comments (the FK lands with the comments ticket).
+ */
+export const cards = pgTable("cards", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  boardId: text("board_id")
+    .notNull()
+    .references(() => boards.id, { onDelete: "cascade" }),
+  columnId: text("column_id")
+    .notNull()
+    .references(() => columns.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  position: text("position").notNull(),
+  assigneeId: text("assignee_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdById: text("created_by_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Card = typeof cards.$inferSelect;
+export type NewCard = typeof cards.$inferInsert;
