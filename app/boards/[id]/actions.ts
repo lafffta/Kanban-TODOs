@@ -14,6 +14,7 @@ import {
   cardTitleSchema,
   createCard,
   deleteCard,
+  moveCard,
   updateCard,
 } from "@/db/cards";
 import { redirectOnBoardDenial, requireUserId } from "./access";
@@ -147,6 +148,32 @@ export async function assignCardAction(input: {
   const userId = await requireUserId();
   await redirectOnBoardDenial(() =>
     assignCard({ cardId: input.cardId, assigneeId: input.assigneeId, userId }),
+  );
+  revalidatePath(`/boards/${input.boardId}`);
+}
+
+/**
+ * Move a card between `beforeId` and `afterId` (each a card id or null for an
+ * end) inside `columnId` — a reorder when the column is unchanged, a cross-lane
+ * move otherwise. The board view passes the ids of the neighbours the card lands
+ * between; the db layer generates one fractional key and rewrites the single row.
+ */
+export async function moveCardAction(input: {
+  boardId: string;
+  cardId: string;
+  columnId: string;
+  beforeId: string | null;
+  afterId: string | null;
+}): Promise<void> {
+  const userId = await requireUserId();
+  await redirectOnBoardDenial(() =>
+    moveCard({
+      cardId: input.cardId,
+      columnId: input.columnId,
+      beforeId: input.beforeId,
+      afterId: input.afterId,
+      userId,
+    }),
   );
   revalidatePath(`/boards/${input.boardId}`);
 }

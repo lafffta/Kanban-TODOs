@@ -9,10 +9,10 @@ activation** so vertical page scroll still works on mobile.
 
 **Blocked by:** 05 — Cards + assignees.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Drag a card within a column → new fractional `position` persisted
-- [ ] Drag a card to another column → `columnId` + `position` persisted
-- [ ] dnd-kit touch sensors with long-press activation; vertical scroll still works on a phone
-- [ ] Move is one row update; concurrent moves produce distinct keys (jitter), settling last-write-wins
+- [x] Drag a card within a column → new fractional `position` persisted
+- [x] Drag a card to another column → `columnId` + `position` persisted
+- [x] dnd-kit touch sensors with long-press activation; vertical scroll still works on a phone
+- [x] Move is one row update; concurrent moves produce distinct keys (jitter), settling last-write-wins
 - [ ] Move a task on a phone (demo)
