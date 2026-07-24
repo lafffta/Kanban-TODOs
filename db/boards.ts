@@ -1,13 +1,21 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
 import {
   boardMembers,
   boards,
+  users,
   type Board,
   type BoardMember,
   type BoardRole,
+  type UserProfile,
 } from "./schema";
+
+/**
+ * A board member: their display profile (`id` + avatar/label fields) plus the
+ * `role` they hold. Feeds the assignee picker and card-face avatars.
+ */
+export type BoardMemberProfile = UserProfile & { role: BoardRole };
 
 /** Role ranking for `minRole` comparisons: an owner outranks a member. */
 const ROLE_RANK: Record<BoardRole, number> = { member: 1, owner: 2 };
@@ -73,6 +81,28 @@ export async function listBoardsForUser(userId: string): Promise<Board[]> {
     .where(eq(boardMembers.userId, userId))
     .orderBy(desc(boards.createdAt));
   return rows.map((r) => r.board);
+}
+
+/**
+ * A board's members with their display profiles, owners first then by join time.
+ * Feeds the assignee picker and card avatars; call after the caller's own
+ * membership has been verified with `requireBoardMember`.
+ */
+export async function listBoardMembers(boardId: string): Promise<BoardMemberProfile[]> {
+  const rows = await db
+    .select({
+      id: users.id,
+      role: boardMembers.role,
+      name: users.name,
+      email: users.email,
+      image: users.image,
+      createdAt: boardMembers.createdAt,
+    })
+    .from(boardMembers)
+    .innerJoin(users, eq(users.id, boardMembers.userId))
+    .where(eq(boardMembers.boardId, boardId))
+    .orderBy(desc(boardMembers.role), asc(boardMembers.createdAt));
+  return rows.map(({ createdAt: _createdAt, ...profile }) => profile);
 }
 
 /**

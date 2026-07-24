@@ -2,6 +2,10 @@
 
 import { useActionState, useEffect, useState, useTransition } from "react";
 import type { Column } from "@/db/schema";
+import type { BoardMemberProfile } from "@/db/boards";
+import type { CardWithAssignee } from "@/db/cards";
+import { AddCardForm } from "./add-card-form";
+import { CardItem } from "./card-item";
 import {
   deleteColumnAction,
   renameColumnAction,
@@ -13,19 +17,22 @@ import {
 export type MoveTarget = { beforeId: string | null; afterId: string | null } | null;
 
 /**
- * One board lane: its name (rename inline), reorder-by-one controls, and delete
- * (with a confirm). Cards render inside a lane in the next ticket — for now the
- * body is an empty-state placeholder. Every control routes through a membership-
- * checked server action.
+ * One board lane: its name (rename inline), reorder-by-one controls, delete (with
+ * a confirm), its cards in `position` order, and an add-card form. Every control
+ * routes through a membership-checked server action.
  */
 export function ColumnLane({
   boardId,
   column,
+  cards,
+  members,
   moveLeft,
   moveRight,
 }: {
   boardId: string;
   column: Column;
+  cards: CardWithAssignee[];
+  members: BoardMemberProfile[];
   moveLeft: MoveTarget;
   moveRight: MoveTarget;
 }) {
@@ -124,7 +131,15 @@ export function ColumnLane({
       {state?.error && editing && (
         <p className="px-3 pb-2 text-xs text-red-600 dark:text-red-400">{state.error}</p>
       )}
-      <div className="flex-1 px-3 pb-3 text-xs opacity-50">No cards yet.</div>
+      <div className="flex flex-1 flex-col gap-2 px-3 pb-3">
+        {cards.map((card) => (
+          <CardItem key={card.id} boardId={boardId} card={card} members={members} />
+        ))}
+        {cards.length === 0 && (
+          <p className="py-1 text-xs opacity-50">No cards yet.</p>
+        )}
+        <AddCardForm boardId={boardId} columnId={column.id} />
+      </div>
     </section>
   );
 }

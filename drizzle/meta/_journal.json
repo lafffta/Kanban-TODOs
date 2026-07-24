@@ -36,6 +36,13 @@
       "when": 1784906126014,
       "tag": "0004_fancy_ikaris",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784907689303,
+      "tag": "0005_loose_infant_terrible",
+      "breakpoints": true
     }
   ]
 }

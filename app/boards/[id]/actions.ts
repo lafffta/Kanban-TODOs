@@ -8,9 +8,18 @@ import {
   renameColumn,
   reorderColumn,
 } from "@/db/columns";
+import {
+  assignCard,
+  cardContentSchema,
+  cardTitleSchema,
+  createCard,
+  deleteCard,
+  updateCard,
+} from "@/db/cards";
 import { redirectOnBoardDenial, requireUserId } from "./access";
 
 export type ColumnFormState = { error: string } | undefined;
+export type CardFormState = { error: string } | undefined;
 
 /** Create a column at the end of a board's lanes (member-permitted). */
 export async function createColumnAction(
@@ -79,5 +88,75 @@ export async function deleteColumnAction(input: {
   await redirectOnBoardDenial(() =>
     deleteColumn({ columnId: input.columnId, userId }),
   );
+  revalidatePath(`/boards/${input.boardId}`);
+}
+
+/** Create a card at the end of a column (member-permitted). */
+export async function createCardAction(
+  boardId: string,
+  columnId: string,
+  _prev: CardFormState,
+  formData: FormData,
+): Promise<CardFormState> {
+  const userId = await requireUserId();
+  const parsed = cardTitleSchema.safeParse({ title: formData.get("title") });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid card title." };
+  }
+  await redirectOnBoardDenial(() =>
+    createCard({ boardId, columnId, title: parsed.data.title, userId }),
+  );
+  revalidatePath(`/boards/${boardId}`);
+}
+
+/** Edit a card's title and description (member-permitted). */
+export async function updateCardAction(
+  boardId: string,
+  cardId: string,
+  _prev: CardFormState,
+  formData: FormData,
+): Promise<CardFormState> {
+  const userId = await requireUserId();
+  const parsed = cardContentSchema.safeParse({
+    title: formData.get("title"),
+    description: formData.get("description") ?? "",
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid card." };
+  }
+  await redirectOnBoardDenial(() =>
+    updateCard({
+      cardId,
+      title: parsed.data.title,
+      description: parsed.data.description,
+      userId,
+    }),
+  );
+  revalidatePath(`/boards/${boardId}`);
+}
+
+/**
+ * Assign a card to a board member, or clear it with `assigneeId: null`. The UI
+ * only offers current members, so the db-layer membership check is a backstop.
+ */
+export async function assignCardAction(input: {
+  boardId: string;
+  cardId: string;
+  assigneeId: string | null;
+}): Promise<void> {
+  const userId = await requireUserId();
+  await redirectOnBoardDenial(() =>
+    assignCard({ cardId: input.cardId, assigneeId: input.assigneeId, userId }),
+  );
+  revalidatePath(`/boards/${input.boardId}`);
+}
+
+/** Delete a card (member-permitted). Confirm dialog lives in the UI. */
+export async function deleteCardAction(input: {
+  boardId: string;
+  cardId: string;
+}): Promise<void> {
+  const userId = await requireUserId();
+  await redirectOnBoardDenial(() => deleteCard({ cardId: input.cardId, userId }));
   revalidatePath(`/boards/${input.boardId}`);
 }
