@@ -70,11 +70,15 @@ export function BoardView({
   columns,
   cards,
   members,
+  currentUserId,
+  isOwner,
 }: {
   boardId: string;
   columns: Column[];
   cards: CardWithAssignee[];
   members: BoardMemberProfile[];
+  currentUserId: string;
+  isOwner: boolean;
 }) {
   const byId = useMemo(() => {
     const map = new Map<string, CardWithAssignee>();
@@ -210,6 +214,8 @@ export function BoardView({
               column={column}
               cards={lanes[column.id] ?? []}
               members={members}
+              currentUserId={currentUserId}
+              isOwner={isOwner}
               moveLeft={moveLeft}
               moveRight={moveRight}
             />

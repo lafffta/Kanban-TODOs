@@ -6,6 +6,7 @@ import { CSS } from "@dnd-kit/utilities";
 import type { BoardMemberProfile } from "@/db/boards";
 import type { CardWithAssignee } from "@/db/cards";
 import { Avatar, displayName } from "./avatar";
+import { CommentThread } from "./comment-thread";
 import {
   assignCardAction,
   deleteCardAction,
@@ -18,10 +19,26 @@ import {
 const cardFaceBase =
   "flex w-full items-start gap-2 rounded-xl border border-black/10 px-3 py-2 text-left dark:border-white/10";
 
+/** A small "💬 N" badge on a card face, shown only when the card has comments. */
+function CommentCount({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-0.5 text-xs opacity-60"
+      aria-label={`${count} comment${count === 1 ? "" : "s"}`}
+      title={`${count} comment${count === 1 ? "" : "s"}`}
+    >
+      <span aria-hidden>💬</span>
+      {count}
+    </span>
+  );
+}
+
 /**
- * A card's collapsed face — title plus, when assigned, the assignee's avatar. Used
- * for the `DragOverlay` clone; the interactive collapsed card below repeats the
- * same content on a sortable `<button>`.
+ * A card's collapsed face — title, a comment count when it has comments, and the
+ * assignee's avatar when assigned. Used for the `DragOverlay` clone; the
+ * interactive collapsed card below repeats the same content on a sortable
+ * `<button>`.
  */
 export function CardFace({
   card,
@@ -37,6 +54,7 @@ export function CardFace({
       }`}
     >
       <span className="flex-1 whitespace-pre-wrap break-words text-sm">{card.title}</span>
+      <CommentCount count={card.commentCount} />
       {card.assignee && <Avatar user={card.assignee} />}
     </div>
   );
@@ -52,10 +70,14 @@ export function CardItem({
   boardId,
   card,
   members,
+  currentUserId,
+  isOwner,
 }: {
   boardId: string;
   card: CardWithAssignee;
   members: BoardMemberProfile[];
+  currentUserId: string;
+  isOwner: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const save = updateCardAction.bind(null, boardId, card.id);
@@ -102,6 +124,7 @@ export function CardItem({
         {...listeners}
       >
         <span className="flex-1 whitespace-pre-wrap break-words text-sm">{card.title}</span>
+        <CommentCount count={card.commentCount} />
         {card.assignee && <Avatar user={card.assignee} />}
       </button>
     );
@@ -176,6 +199,13 @@ export function CardItem({
           ))}
         </select>
       </label>
+
+      <CommentThread
+        boardId={boardId}
+        cardId={card.id}
+        currentUserId={currentUserId}
+        isOwner={isOwner}
+      />
     </div>
   );
 }

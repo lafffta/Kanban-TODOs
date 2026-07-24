@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
 import { keyBetween } from "./ordering";
@@ -6,6 +6,7 @@ import { requireBoardMember } from "./boards";
 import {
   columns,
   cards,
+  comments,
   users,
   boardMembers,
   type Card,
@@ -41,13 +42,21 @@ export class AssigneeNotBoardMemberError extends Error {
   }
 }
 
-/** A card plus its resolved assignee profile (null when unassigned). */
-export type CardWithAssignee = Card & { assignee: UserProfile | null };
+/**
+ * A card plus its resolved assignee profile (null when unassigned) and its comment
+ * count (for the count badge on the card face).
+ */
+export type CardWithAssignee = Card & {
+  assignee: UserProfile | null;
+  commentCount: number;
+};
 
 /**
- * A board's cards with assignee profiles, ordered by column then `position` (id
- * breaks any jitter tie). The board page groups these by `columnId` into lanes and
- * the "my cards" filter narrows by `assigneeId`.
+ * A board's cards with assignee profiles and comment counts, ordered by column
+ * then `position` (id breaks any jitter tie). The board page groups these by
+ * `columnId` into lanes and the "my cards" filter narrows by `assigneeId`. Comment
+ * counts come from a single grouped read, so the count badge costs no per-card
+ * query.
  */
 export async function listCards(boardId: string): Promise<CardWithAssignee[]> {
   const rows = await db
@@ -64,7 +73,20 @@ export async function listCards(boardId: string): Promise<CardWithAssignee[]> {
     .leftJoin(users, eq(users.id, cards.assigneeId))
     .where(eq(cards.boardId, boardId))
     .orderBy(asc(cards.columnId), asc(cards.position), asc(cards.id));
-  return rows.map((r) => ({ ...r.card, assignee: r.assignee?.id ? r.assignee : null }));
+
+  const counts = await db
+    .select({ cardId: comments.cardId, count: sql<number>`count(*)::int` })
+    .from(comments)
+    .innerJoin(cards, eq(cards.id, comments.cardId))
+    .where(eq(cards.boardId, boardId))
+    .groupBy(comments.cardId);
+  const countByCard = new Map(counts.map((r) => [r.cardId, r.count]));
+
+  return rows.map((r) => ({
+    ...r.card,
+    assignee: r.assignee?.id ? r.assignee : null,
+    commentCount: countByCard.get(r.card.id) ?? 0,
+  }));
 }
 
 /**
@@ -73,7 +95,7 @@ export async function listCards(boardId: string): Promise<CardWithAssignee[]> {
  * `requireBoardMember` seam). Throws `BoardAccessError` for a non-member,
  * `CardNotFoundError` if the card is gone.
  */
-async function requireCardMember(cardId: string, userId: string): Promise<Card> {
+export async function requireCardMember(cardId: string, userId: string): Promise<Card> {
   const [card] = await db.select().from(cards).where(eq(cards.id, cardId)).limit(1);
   if (!card) throw new CardNotFoundError(cardId);
   await requireBoardMember(card.boardId, userId);

@@ -17,10 +17,12 @@ import {
   moveCard,
   updateCard,
 } from "@/db/cards";
+import { addComment, commentBodySchema, deleteComment } from "@/db/comments";
 import { redirectOnBoardDenial, requireUserId } from "./access";
 
 export type ColumnFormState = { error: string } | undefined;
 export type CardFormState = { error: string } | undefined;
+export type CommentFormState = { error: string } | undefined;
 
 /** Create a column at the end of a board's lanes (member-permitted). */
 export async function createColumnAction(
@@ -185,5 +187,42 @@ export async function deleteCardAction(input: {
 }): Promise<void> {
   const userId = await requireUserId();
   await redirectOnBoardDenial(() => deleteCard({ cardId: input.cardId, userId }));
+  revalidatePath(`/boards/${input.boardId}`);
+}
+
+/**
+ * Add a plain-text comment to a card (any member). Returns a form-state error on an
+ * empty/oversized body; the card detail view reloads the thread on success and the
+ * revalidate refreshes the card face's comment count.
+ */
+export async function addCommentAction(input: {
+  boardId: string;
+  cardId: string;
+  body: string;
+}): Promise<CommentFormState> {
+  const userId = await requireUserId();
+  const parsed = commentBodySchema.safeParse({ body: input.body });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid comment." };
+  }
+  await redirectOnBoardDenial(() =>
+    addComment({ cardId: input.cardId, body: parsed.data.body, userId }),
+  );
+  revalidatePath(`/boards/${input.boardId}`);
+}
+
+/**
+ * Delete a comment — the author's own, or any as a board owner (enforced in the db
+ * layer). The UI only shows the delete control to a permitted user, so the db-layer
+ * `CommentPermissionError` is a backstop.
+ */
+export async function deleteCommentAction(input: {
+  boardId: string;
+  commentId: string;
+}): Promise<void> {
+  const userId = await requireUserId();
+  await redirectOnBoardDenial(() =>
+    deleteComment({ commentId: input.commentId, userId }),
+  );
   revalidatePath(`/boards/${input.boardId}`);
 }
