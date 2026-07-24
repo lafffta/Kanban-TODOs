@@ -17,7 +17,13 @@ import {
   moveCard,
   updateCard,
 } from "@/db/cards";
-import { addComment, commentBodySchema, deleteComment } from "@/db/comments";
+import {
+  addComment,
+  commentBodySchema,
+  deleteComment,
+  CommentNotFoundError,
+  CommentPermissionError,
+} from "@/db/comments";
 import { redirectOnBoardDenial, requireUserId } from "./access";
 
 export type ColumnFormState = { error: string } | undefined;
@@ -214,15 +220,27 @@ export async function addCommentAction(input: {
 /**
  * Delete a comment — the author's own, or any as a board owner (enforced in the db
  * layer). The UI only shows the delete control to a permitted user, so the db-layer
- * `CommentPermissionError` is a backstop.
+ * `CommentPermissionError` is a backstop — but a stale thread (the comment was
+ * reassigned or the caller's role changed since render) can still hit it, so it's
+ * returned as a form error the thread can display rather than thrown as a 500.
  */
 export async function deleteCommentAction(input: {
   boardId: string;
   commentId: string;
-}): Promise<void> {
+}): Promise<CommentFormState> {
   const userId = await requireUserId();
-  await redirectOnBoardDenial(() =>
-    deleteComment({ commentId: input.commentId, userId }),
-  );
+  try {
+    await redirectOnBoardDenial(() =>
+      deleteComment({ commentId: input.commentId, userId }),
+    );
+  } catch (error) {
+    if (error instanceof CommentPermissionError) {
+      return { error: "You can only delete your own comments." };
+    }
+    if (error instanceof CommentNotFoundError) {
+      return { error: "That comment was already deleted." };
+    }
+    throw error;
+  }
   revalidatePath(`/boards/${input.boardId}`);
 }

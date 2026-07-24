@@ -9,6 +9,7 @@ import {
   comments,
   users,
   boardMembers,
+  type BoardMember,
   type Card,
   type UserProfile,
 } from "./schema";
@@ -90,16 +91,21 @@ export async function listCards(boardId: string): Promise<CardWithAssignee[]> {
 }
 
 /**
- * Load a card and confirm the caller may act on its board. Every card mutation
+ * Load a card and confirm the caller may act on its board, returning both the card
+ * and the caller's membership (so a caller that needs the role — e.g. a comment
+ * delete — can read it without a second lookup). Every card *and comment* mutation
  * funnels through here, so membership is checked in exactly one place (the
  * `requireBoardMember` seam). Throws `BoardAccessError` for a non-member,
  * `CardNotFoundError` if the card is gone.
  */
-export async function requireCardMember(cardId: string, userId: string): Promise<Card> {
+export async function requireCardMember(
+  cardId: string,
+  userId: string,
+): Promise<{ card: Card; membership: BoardMember }> {
   const [card] = await db.select().from(cards).where(eq(cards.id, cardId)).limit(1);
   if (!card) throw new CardNotFoundError(cardId);
-  await requireBoardMember(card.boardId, userId);
-  return card;
+  const membership = await requireBoardMember(card.boardId, userId);
+  return { card, membership };
 }
 
 /**
@@ -158,7 +164,7 @@ export async function updateCard(input: {
   description: string;
   userId: string;
 }): Promise<Card> {
-  const card = await requireCardMember(input.cardId, input.userId);
+  const { card } = await requireCardMember(input.cardId, input.userId);
   const [updated] = await db
     .update(cards)
     .set({ title: input.title, description: input.description, updatedAt: new Date() })
@@ -177,7 +183,7 @@ export async function assignCard(input: {
   assigneeId: string | null;
   userId: string;
 }): Promise<Card> {
-  const card = await requireCardMember(input.cardId, input.userId);
+  const { card } = await requireCardMember(input.cardId, input.userId);
 
   if (input.assigneeId !== null) {
     const [member] = await db
@@ -218,7 +224,7 @@ export async function moveCard(input: {
   afterId: string | null;
   userId: string;
 }): Promise<Card> {
-  const card = await requireCardMember(input.cardId, input.userId);
+  const { card } = await requireCardMember(input.cardId, input.userId);
   await requireColumnInBoard(input.columnId, card.boardId);
 
   // A neighbour's position, scoped to the target column: a card named as a drop
@@ -260,6 +266,6 @@ export async function deleteCard(input: {
   cardId: string;
   userId: string;
 }): Promise<void> {
-  const card = await requireCardMember(input.cardId, input.userId);
+  const { card } = await requireCardMember(input.cardId, input.userId);
   await db.delete(cards).where(eq(cards.id, card.id));
 }

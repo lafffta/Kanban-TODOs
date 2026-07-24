@@ -83,7 +83,12 @@ export function CommentThread({
 
   function remove(commentId: string) {
     startTransition(async () => {
-      await deleteCommentAction({ boardId, commentId });
+      const result = await deleteCommentAction({ boardId, commentId });
+      if (result?.error) {
+        setError(result.error);
+        return;
+      }
+      setError(null);
       await load();
     });
   }

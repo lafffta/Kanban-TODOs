@@ -9,7 +9,9 @@ activation** so vertical page scroll still works on mobile.
 
 **Blocked by:** 05 — Cards + assignees.
 
-**Status:** done
+**Status:** code done — merged to `main` (PRs #4, #5). Two post-merge review bugs
+(drag-end snap-back; wrong neighbours under the "my cards" filter) are fixed on the
+follow-up branch. The phone drag demo below is still outstanding — see `TODO.md`.
 
 - [x] Drag a card within a column → new fractional `position` persisted
 - [x] Drag a card to another column → `columnId` + `position` persisted
