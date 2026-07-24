@@ -9,10 +9,11 @@ the `boards` and `board_members` tables (PK `boardId + userId`, `role` =
 
 **Blocked by:** 02 — Auth.
 
-**Status:** ready-for-agent
+**Status:** done (commit a239e21)
 
-- [ ] Create a board → creator row in `board_members` with role `owner`
-- [ ] `GET /api/boards` returns only boards the current user is a member of
-- [ ] `requireBoardMember(boardId, userId, minRole?)` seam exists and gates board access; a non-member gets 403/redirect
-- [ ] Two accounts each see only their own boards (demo)
-- [ ] Mutations Zod-validated and membership-checked
+- [x] Create a board → creator row in `board_members` with role `owner`
+- [x] `GET /api/boards` returns only boards the current user is a member of
+- [x] `requireBoardMember(boardId, userId, minRole?)` seam exists and gates board access; a non-member gets 403/redirect
+      — seam + BoardAccessError built and integration-tested; no live caller yet (no single-board route until ticket 04), so the 403/redirect path is proven in tests, dormant in the app until columns/cards consume it.
+- [x] Two accounts each see only their own boards (demo)
+- [x] Mutations Zod-validated and membership-checked
