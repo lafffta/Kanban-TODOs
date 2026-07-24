@@ -189,3 +189,27 @@ export const cards = pgTable("cards", {
 
 export type Card = typeof cards.$inferSelect;
 export type NewCard = typeof cards.$inferInsert;
+
+/**
+ * A plain-text comment on a card (D7 — no markdown, so no HTML-sanitization
+ * surface). Deleting a card cascades its comments (D5); `authorId` is `ON DELETE
+ * SET NULL` so a removed member's comments survive on the board as "former
+ * member" (D5). Comments are add + delete only — there is no edit (D7). The thread
+ * renders by `ORDER BY createdAt`.
+ */
+export const comments = pgTable("comments", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  cardId: text("card_id")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  authorId: text("author_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Comment = typeof comments.$inferSelect;
+export type NewComment = typeof comments.$inferInsert;

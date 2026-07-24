@@ -28,6 +28,8 @@ export function ColumnLane({
   column,
   cards,
   members,
+  currentUserId,
+  isOwner,
   moveLeft,
   moveRight,
 }: {
@@ -35,6 +37,8 @@ export function ColumnLane({
   column: Column;
   cards: CardWithAssignee[];
   members: BoardMemberProfile[];
+  currentUserId: string;
+  isOwner: boolean;
   moveLeft: MoveTarget;
   moveRight: MoveTarget;
 }) {
@@ -143,7 +147,14 @@ export function ColumnLane({
           strategy={verticalListSortingStrategy}
         >
           {cards.map((card) => (
-            <CardItem key={card.id} boardId={boardId} card={card} members={members} />
+            <CardItem
+              key={card.id}
+              boardId={boardId}
+              card={card}
+              members={members}
+              currentUserId={currentUserId}
+              isOwner={isOwner}
+            />
           ))}
         </SortableContext>
         {cards.length === 0 && (

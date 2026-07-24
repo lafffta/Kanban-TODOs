@@ -21,7 +21,8 @@ export default async function BoardPage({
   const { id } = await params;
   const { mine } = await searchParams;
   const userId = await requireUserId();
-  await redirectOnBoardDenial(() => requireBoardMember(id, userId));
+  const membership = await redirectOnBoardDenial(() => requireBoardMember(id, userId));
+  const isOwner = membership.role === "owner";
 
   const board = await getBoard(id);
   if (!board) redirect("/boards");
@@ -58,7 +59,14 @@ export default async function BoardPage({
         </Link>
       </div>
 
-      <BoardView boardId={id} columns={columns} cards={visibleCards} members={members} />
+      <BoardView
+        boardId={id}
+        columns={columns}
+        cards={visibleCards}
+        members={members}
+        currentUserId={userId}
+        isOwner={isOwner}
+      />
 
 
       {columns.length === 0 && (
