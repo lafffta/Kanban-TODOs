@@ -125,3 +125,24 @@ export const boardMembers = pgTable(
 
 export type BoardMember = typeof boardMembers.$inferSelect;
 export type NewBoardMember = typeof boardMembers.$inferInsert;
+
+/**
+ * An ordered lane on a board (e.g. "To Do"). `position` is a fractional-index
+ * string (D3, see `db/ordering.ts`), so lanes render by `ORDER BY position` and a
+ * reorder rewrites one row. Deleting a board cascades its columns; the cascade of
+ * a non-empty column's cards + comments lands with the cards ticket (D5).
+ */
+export const columns = pgTable("columns", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  boardId: text("board_id")
+    .notNull()
+    .references(() => boards.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  position: text("position").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Column = typeof columns.$inferSelect;
+export type NewColumn = typeof columns.$inferInsert;

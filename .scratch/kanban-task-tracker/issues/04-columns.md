@@ -11,10 +11,10 @@ dialog on delete.
 
 **Blocked by:** 03 — Boards + membership.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `columns` table with `boardId`, `name`, `position` (TEXT fractional index)
-- [ ] Create / rename / delete a column (member-permitted, membership-checked)
-- [ ] Reorder a column by generating a fractional key between neighbours with jitter; one row updated per move
-- [ ] Board renders columns in `position` order
-- [ ] Shared fractional-index helper extracted for reuse
+- [x] `columns` table with `boardId`, `name`, `position` (TEXT fractional index)
+- [x] Create / rename / delete a column (member-permitted, membership-checked)
+- [x] Reorder a column by generating a fractional key between neighbours with jitter; one row updated per move
+- [x] Board renders columns in `position` order
+- [x] Shared fractional-index helper extracted for reuse

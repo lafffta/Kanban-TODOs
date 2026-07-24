@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/auth";
 import { listBoardsForUser } from "@/db/boards";
@@ -43,11 +44,13 @@ export default async function BoardsPage() {
       ) : (
         <ul className="space-y-2">
           {boards.map((board) => (
-            <li
-              key={board.id}
-              className="rounded-xl border border-black/10 px-4 py-3 text-sm font-medium dark:border-white/15"
-            >
-              {board.name}
+            <li key={board.id}>
+              <Link
+                href={`/boards/${board.id}`}
+                className="block rounded-xl border border-black/10 px-4 py-3 text-sm font-medium hover:border-black/25 dark:border-white/15 dark:hover:border-white/30"
+              >
+                {board.name}
+              </Link>
             </li>
           ))}
         </ul>
