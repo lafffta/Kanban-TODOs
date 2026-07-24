@@ -9,12 +9,12 @@ migration, and deploys to Vercel.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** in-progress — code complete on `feat/01-walking-skeleton`; DB-apply + deploy pending external deps
+**Status:** in-progress — local slice complete & verified on `feat/01-walking-skeleton`; only the Vercel deploy remains (handed off)
 
 - [x] Next.js 15 App Router + TypeScript + Tailwind scaffold builds and runs locally *(verified: build + dev-server 200)*
-- [x] Drizzle + drizzle-kit configured; connects via the Neon **pooled** endpoint (`@neondatabase/serverless`), Docker Postgres for local dev *(both drivers wired in `db/index.ts`; live connection not yet exercised — no Docker installed)*
-- [~] One migration is authored and applied (a trivial table is fine) *(authored: `drizzle/0000_new_magik.sql` → `greetings`; **apply pending** `docker compose up` + `npm run db:migrate`)*
-- [~] A "hello" page renders data fetched through the DB connection, proving the round trip *(page + `db/round-trip.test.ts` written; **round-trip pending** local Postgres)*
+- [x] Drizzle + drizzle-kit configured; connects via the Neon **pooled** endpoint (`@neondatabase/serverless`), Docker Postgres for local dev *(both drivers wired in `db/index.ts`; local `pg` driver exercised live against Docker Postgres 16)*
+- [x] One migration is authored and applied (a trivial table is fine) *(authored: `drizzle/0000_new_magik.sql` → `greetings`; applied via `npm run db:migrate` — "migrations applied successfully")*
+- [x] A "hello" page renders data fetched through the DB connection, proving the round trip *(round-trip test green — 1 passed; prod build serves the greeting live: "✅ Fetched from Postgres — the pipe works end to end.")*
 - [ ] App is deployed to Vercel and the hello page is reachable at its URL *(deploy handed off — steps in `README.md`; needs a Neon account + Vercel login)*
 
-**To finish (user):** install/start Docker → `docker compose up -d` → `npm run db:migrate && npm run db:seed && npm test` (closes the two `[~]` items), then follow the README deploy hand-off to close the last item.
+**To finish (user):** follow the README "Deploying to Vercel (hand-off)" section (Neon pooled URL + Vercel import) to close the last item.
