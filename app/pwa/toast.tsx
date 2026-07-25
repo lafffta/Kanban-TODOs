@@ -2,29 +2,32 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
-/**
- * A one-line transient message.
- *
- * It exists for the case the ticket names: a mutation refused because the device
- * is offline. Those refusals happen far from any one form — a drag, an assignee
- * change, a comment — so they need somewhere to be said that every board control
- * can reach.
- *
- * Deliberately one message at a time: a second toast replaces the first rather
- * than stacking, because two refusals in a row are the same news twice.
- */
+/** How a component raises a transient message. */
 type ToastControls = { show: (message: string) => void };
 
 const ToastContext = createContext<ToastControls | null>(null);
 
+/** How long a message stays up before it fades on its own. */
 const TOAST_MS = 4_000;
 
+/** Raise a one-line transient message from anywhere under `<ToastProvider>`. */
 export function useToast(): ToastControls {
   const controls = useContext(ToastContext);
   if (!controls) throw new Error("useToast must be used inside <ToastProvider>.");
   return controls;
 }
 
+/**
+ * A one-line transient message, and the place it appears.
+ *
+ * It exists for the case the ticket names: a mutation refused because the device
+ * is offline. Those refusals happen far from any one form — a drag, an assignee
+ * change, a comment — so they need somewhere to be said that every control on the
+ * page can reach.
+ *
+ * Deliberately one message at a time: a second toast replaces the first rather
+ * than stacking, because two refusals in a row are the same news twice.
+ */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [message, setMessage] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -35,7 +38,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     timer.current = setTimeout(() => setMessage(null), TOAST_MS);
   }, []);
 
-  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+  useEffect(() => {
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
 
   return (
     <ToastContext.Provider value={{ show }}>

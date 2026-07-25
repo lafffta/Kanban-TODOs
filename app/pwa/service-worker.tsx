@@ -19,7 +19,9 @@ export function ServiceWorkerRegistrar() {
     if (process.env.NODE_ENV !== "production") {
       void navigator.serviceWorker
         .getRegistrations()
-        .then((registrations) => registrations.forEach((it) => void it.unregister()))
+        .then((registrations) =>
+          registrations.forEach((registration) => void registration.unregister()),
+        )
         .catch(() => {});
       return;
     }
@@ -84,30 +86,4 @@ export function OfflineCopyWarmer() {
   }, [pathname]);
 
   return null;
-}
-
-/**
- * Forget everything this device holds about the signed-in user: the persisted
- * board cache, the note of which board to open offline, and the pages and API
- * responses the service worker cached for them.
- *
- * Called on sign-out. Without it, signing out on a shared phone would leave the
- * boards readable to the next person by pulling the plug on the network.
- */
-export async function clearOfflineData(): Promise<void> {
-  const { deletePersistedQueries } = await import("./query-persistence");
-  const { forgetLastBoard } = await import("./last-board");
-
-  forgetLastBoard(window.localStorage);
-  await deletePersistedQueries();
-
-  if (!("serviceWorker" in navigator)) return;
-  try {
-    // `getRegistration` rather than `ready`, which never settles when nothing is
-    // registered — sign-out must not hang on a browser that has no worker.
-    const registration = await navigator.serviceWorker.getRegistration();
-    registration?.active?.postMessage({ type: "CLEAR_CACHES" });
-  } catch {
-    // No worker to tell — there is then nothing it cached either.
-  }
 }

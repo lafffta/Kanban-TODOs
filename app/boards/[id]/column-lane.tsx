@@ -23,6 +23,13 @@ import {
 export type MoveTarget = { beforeId: string | null; afterId: string | null } | null;
 
 /**
+ * How wide a lane sits in the board's scrolling row: most of the width of a phone
+ * and a fixed column on a desktop, snapping one at a time (ticket 10). Shared with
+ * the add-a-column form, which is the last "lane" in the same row.
+ */
+export const laneWidthClass = "w-[85vw] max-w-[20rem] shrink-0 snap-start sm:w-72";
+
+/**
  * One board lane: its name (rename inline), reorder-by-one controls, delete (with
  * a confirm), its cards in `position` order, and an add-card form. Every control
  * routes through a membership-checked server action, patching the cached board
@@ -89,9 +96,10 @@ export function ColumnLane({
   }
 
   return (
-    // A lane is most of the width of a phone and a fixed column on a desktop, and
-    // it never grows past the board: its cards scroll inside it (ticket 10).
-    <section className="flex h-full w-[85vw] max-w-[20rem] shrink-0 snap-start flex-col rounded-2xl border border-black/10 bg-black/[0.02] sm:w-72 dark:border-white/15 dark:bg-white/[0.03]">
+    // A lane never grows past the board: its cards scroll inside it (ticket 10).
+    <section
+      className={`${laneWidthClass} flex h-full flex-col rounded-2xl border border-black/10 bg-black/[0.02] dark:border-white/15 dark:bg-white/[0.03]`}
+    >
       <header className="flex shrink-0 items-center gap-1 p-3">
         {editing ? (
           <form onSubmit={rename} className="flex flex-1 gap-1">

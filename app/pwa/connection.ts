@@ -6,6 +6,7 @@ import { useSyncExternalStore } from "react";
 export const OFFLINE_WRITE_MESSAGE =
   "You're offline. Changes are paused until you reconnect.";
 
+/** Re-read `navigator.onLine` whenever the browser says the connection changed. */
 function subscribe(onChange: () => void): () => void {
   window.addEventListener("online", onChange);
   window.addEventListener("offline", onChange);

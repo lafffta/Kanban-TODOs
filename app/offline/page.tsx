@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 
 /**
@@ -7,7 +8,7 @@ import Link from "next/link";
  * It is the only page in the app that must render with no server, no session and
  * no database, so it is deliberately static and says nothing user-specific.
  */
-export const metadata = { title: "Offline — Kanban Task Tracker" };
+export const metadata: Metadata = { title: "Offline — Kanban Task Tracker" };
 
 export default function OfflinePage() {
   return (

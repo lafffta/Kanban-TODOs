@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { OfflineNotice } from "@/app/pwa/offline-banner";
 import type { BoardCard } from "./board-data";
 import { withCardPatch, withoutCard } from "./board-edits";
 import { patchBoard, useBoard } from "./board-context";
@@ -119,9 +120,9 @@ export function CardSheet({ card, onClose }: { card: BoardCard; onClose: () => v
         {/* The sheet covers the page's offline banner on a phone, so it carries
             its own — otherwise a refused edit here has no visible explanation. */}
         {!online && (
-          <p role="status" className="bg-amber-500 px-4 py-1.5 text-center text-xs font-medium text-slate-900">
+          <OfflineNotice className="py-1.5 text-xs">
             Offline — read-only until you reconnect.
-          </p>
+          </OfflineNotice>
         )}
 
         <header className="flex items-center gap-2 border-b border-black/10 px-4 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-3 dark:border-white/10">

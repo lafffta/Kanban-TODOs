@@ -43,6 +43,7 @@ function createCanvas(size) {
   };
 }
 
+/** Whether a pixel falls inside a rounded rectangle — the corner test, in effect. */
 function insideRoundedRect(x, y, x0, y0, width, height, radius) {
   const left = x0 + radius;
   const right = x0 + width - 1 - radius;
@@ -60,12 +61,14 @@ const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
   return c >>> 0;
 });
 
+/** The CRC-32 every PNG chunk is checked by. */
 function crc32(buffer) {
   let c = 0xffffffff;
   for (const byte of buffer) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
 
+/** One PNG chunk: its length, its four-letter type, its data, and their CRC. */
 function chunk(type, data) {
   const length = Buffer.alloc(4);
   length.writeUInt32BE(data.length);

@@ -8,8 +8,8 @@ import {
   type QueryKey,
 } from "@tanstack/react-query";
 import type { BoardMemberProfile } from "@/db/boards";
-import { OFFLINE_WRITE_MESSAGE, useOnline } from "@/app/pwa/connection";
-import { useToast } from "@/app/pwa/toast";
+import { useOnline } from "@/app/pwa/connection";
+import { useOfflineWriteGate } from "@/app/pwa/offline-write-gate";
 import {
   BOARD_POLL_MS,
   boardKeys,
@@ -134,7 +134,7 @@ export function BoardProvider({
   const queryClient = useQueryClient();
   const [reconciler] = useState<Reconciler>(createReconciler);
   const online = useOnline();
-  const { show: showToast } = useToast();
+  const refuseWhileOffline = useOfflineWriteGate();
 
   const boardQuery = useQuery({
     queryKey: boardKeys.board(boardId),
@@ -215,14 +215,10 @@ export function BoardProvider({
   const { mutateAsync } = mutation;
   const run = useCallback(
     async (write: BoardMutation): Promise<ActionResult> => {
-      // Offline is read-only (D8): there is no write queue, so a mutation is
-      // refused before it is patched in rather than shown as saved and lost. The
-      // toast is because most writes here are a drag or a menu pick, with no form
-      // of their own to report into; callers that do have one also get the error.
-      if (!online) {
-        showToast(OFFLINE_WRITE_MESSAGE);
-        return { error: OFFLINE_WRITE_MESSAGE };
-      }
+      // Offline is read-only (D8): refused before the optimistic patch is even
+      // applied, so nothing is ever shown as saved that wasn't.
+      const refused = refuseWhileOffline();
+      if (refused) return { error: refused };
 
       try {
         return await mutateAsync(write);
@@ -232,7 +228,7 @@ export function BoardProvider({
         return { error: "That didn't save. Check your connection and try again." };
       }
     },
-    [mutateAsync, online, showToast],
+    [mutateAsync, refuseWhileOffline],
   );
 
   return (

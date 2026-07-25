@@ -1,5 +1,8 @@
 import type { MetadataRoute } from "next";
 
+/** The manifest is the same for everyone, so it is built once, not per request. */
+export const dynamic = "force-static";
+
 /**
  * The web app manifest (D8) — what makes the board installable to a phone's home
  * screen, served by Next at `/manifest.webmanifest`.
@@ -12,8 +15,6 @@ import type { MetadataRoute } from "next";
  * signed-in home, and when that launch is offline the list hands straight over to
  * the last-seen board (see `LastBoardLaunch`).
  */
-export const dynamic = "force-static";
-
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Kanban Task Tracker",
@@ -22,7 +23,6 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/boards",
     scope: "/",
     display: "standalone",
-    orientation: "portrait-primary",
     background_color: "#0f172a",
     theme_color: "#0f172a",
     icons: [

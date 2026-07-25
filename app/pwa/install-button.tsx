@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+/** `beforeinstallprompt`, which no TypeScript DOM lib declares yet. */
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+
 /**
  * The custom install affordance (D8).
  *
@@ -14,11 +20,6 @@ import { useCallback, useEffect, useState } from "react";
  * Browsers that don't fire it (Safari installs via the share sheet, and every
  * browser once the app is already installed) simply render nothing.
  */
-type InstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
-
 export function InstallButton() {
   const [prompt, setPrompt] = useState<InstallPromptEvent | null>(null);
 
