@@ -89,8 +89,10 @@ export function ColumnLane({
   }
 
   return (
-    <section className="flex w-72 shrink-0 flex-col rounded-2xl border border-black/10 bg-black/[0.02] dark:border-white/15 dark:bg-white/[0.03]">
-      <header className="flex items-center gap-1 p-3">
+    // A lane is most of the width of a phone and a fixed column on a desktop, and
+    // it never grows past the board: its cards scroll inside it (ticket 10).
+    <section className="flex h-full w-[85vw] max-w-[20rem] shrink-0 snap-start flex-col rounded-2xl border border-black/10 bg-black/[0.02] sm:w-72 dark:border-white/15 dark:bg-white/[0.03]">
+      <header className="flex shrink-0 items-center gap-1 p-3">
         {editing ? (
           <form onSubmit={rename} className="flex flex-1 gap-1">
             <input
@@ -158,7 +160,12 @@ export function ColumnLane({
       {error && editing && (
         <p className="px-3 pb-2 text-xs text-red-600 dark:text-red-400">{error}</p>
       )}
-      <div ref={setDropRef} className="flex flex-1 flex-col gap-2 px-3 pb-3">
+      {/* `overscroll-contain` stops a flick that reaches the end of a lane from
+          scrolling the page behind it. */}
+      <div
+        ref={setDropRef}
+        className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-3 pb-3"
+      >
         <SortableContext
           items={cards.filter((card) => !isProvisional(card.id)).map((card) => card.id)}
           strategy={verticalListSortingStrategy}

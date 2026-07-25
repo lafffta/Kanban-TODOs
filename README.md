@@ -58,6 +58,33 @@ npm run dev
   (required in prod by design decision **D4** — every serverless poll opens a
   connection, so it must go through PgBouncer).
 
+### PWA / offline
+
+The app installs to a home screen and opens with no network (design decision
+**D8**). Two pieces do that, and they only exist in a **production build**:
+
+```bash
+npm run build
+AUTH_TRUST_HOST=true npm start   # http://localhost:3000
+```
+
+- `public/sw.js` — the app-shell service worker. It is deliberately *not*
+  registered by `npm run dev` (and unregisters itself there), because a worker
+  serving cached build output outlives the build that produced it and would hand
+  hot-reloaded pages stale chunks. Its whole caching policy is `classifyRequest`,
+  unit-tested in `app/pwa/sw-strategy.test.ts`.
+- `app/pwa/query-persistence.ts` — the TanStack Query cache, persisted to
+  IndexedDB, so an offline launch opens on the board it last saw.
+
+Offline the board is read-only: writes are refused with a toast rather than
+queued (no background sync in v1). Signing out clears both the persisted cache
+and the worker's caches — they hold the signed-in user's boards.
+
+`AUTH_TRUST_HOST` is only needed for a local production run; Vercel sets it.
+
+Icons are generated, not hand-drawn — `node scripts/generate-icons.mjs` redraws
+`public/icons/` from source.
+
 ---
 
 ## Deploying to Vercel (hand-off)

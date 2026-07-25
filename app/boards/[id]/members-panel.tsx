@@ -141,7 +141,9 @@ export function MembersPanel({
   }
 
   return (
-    <details className="rounded-xl border border-black/10 px-4 py-3 dark:border-white/15">
+    // Opened, the panel takes at most half the board's height and scrolls; a board
+    // with a long member list shouldn't push the lanes off a phone screen.
+    <details className="max-h-[50%] shrink-0 overflow-y-auto rounded-xl border border-black/10 px-4 py-3 dark:border-white/15">
       <summary className="cursor-pointer text-sm font-medium">
         Members ({members.length})
       </summary>

@@ -19,7 +19,7 @@ export default async function InvitePage({
   const review = await reviewInvite(token, user.id);
 
   return (
-    <main className="flex flex-1 items-center justify-center p-8">
+    <main className="flex flex-1 items-center justify-center overflow-y-auto p-8">
       <div className="w-full max-w-sm space-y-4 rounded-2xl border border-black/10 p-8 dark:border-white/15">
         {review.state === "rejected" ? (
           <>

@@ -37,7 +37,7 @@ export function CreateColumnForm() {
   }
 
   return (
-    <form onSubmit={submit} className="w-72 shrink-0 space-y-2">
+    <form onSubmit={submit} className="w-[85vw] max-w-[20rem] shrink-0 snap-start space-y-2 sm:w-72">
       <div className="flex gap-2">
         <input
           value={name}

@@ -4,6 +4,8 @@ import { requireBoardMember } from "@/db/boards";
 import { getBoardSnapshot } from "@/db/board-snapshot";
 import { listPendingInvites } from "@/db/invites";
 import { requireUserId } from "@/app/session";
+import { RememberBoard } from "@/app/pwa/last-board-launch";
+import { OfflineCopyWarmer } from "@/app/pwa/service-worker";
 import { redirectOnBoardDenial } from "./access";
 import { serializeBoard } from "./board-data";
 import { BoardProvider } from "./board-context";
@@ -44,8 +46,10 @@ export default async function BoardPage({
   const onlyMine = mine === "1";
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    // The board owns the viewport: the header and members panel keep their size
+    // and the lanes take the rest, scrolling inside themselves (ticket 10).
+    <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:gap-6 sm:p-6">
+      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
         <div>
           <Link href="/boards" className="text-sm opacity-60 hover:opacity-100">
             ← Boards
@@ -79,11 +83,16 @@ export default async function BoardPage({
         isOwner={isOwner}
       />
 
+      {/* Where an offline launch comes back to, and the copy it opens (D8). */}
+      <RememberBoard boardId={id} name={snapshot.board.name} />
+      <OfflineCopyWarmer />
+
       <BoardProvider
         boardId={id}
         currentUserId={userId}
         isOwner={isOwner}
         initialBoard={serializeBoard(snapshot)}
+        renderedAt={Date.now()}
       >
         <BoardView filterAssigneeId={onlyMine ? userId : null} />
       </BoardProvider>

@@ -15,7 +15,7 @@ export default async function Home() {
   }
 
   return (
-    <main className="flex flex-1 items-center justify-center p-8">
+    <main className="flex flex-1 items-center justify-center overflow-y-auto p-8">
       <div className="w-full max-w-md rounded-2xl border border-black/10 p-8 text-center dark:border-white/15">
         <h1 className="text-2xl font-semibold">Kanban Task Tracker</h1>
         <p className="mt-1 text-sm opacity-60">Walking skeleton</p>
