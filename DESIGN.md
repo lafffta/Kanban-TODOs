@@ -157,6 +157,11 @@ route handler. Assignment sets validate the assignee is a member of the same boa
 ## Server surface
 
 **Reads (polled via TanStack Query → route handlers):**
+- `GET /api/health` — unauthenticated liveness/readiness probe. Runs a `SELECT 1`
+  DB round-trip (the check the old walking-skeleton homepage used to render):
+  `200 {status:"ok",db:"up"}` when Postgres is reachable, `503 {status:"error",db:"down"}`
+  otherwise. The root `/` route redirects into the app (`/boards`), so this endpoint
+  is where the DB pipe is now verified.
 - `GET /api/boards` — boards I'm a member of.
 - `GET /api/boards/:id` — full board: columns + cards (+ assignee, comment counts).
 - `GET /api/boards/:id/version` — `max(updated_at)` cheap poll to guard full refetch (D4).
