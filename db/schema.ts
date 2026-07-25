@@ -138,6 +138,8 @@ export type NewBoardMember = typeof boardMembers.$inferInsert;
  * string (D3, see `db/ordering.ts`), so lanes render by `ORDER BY position` and a
  * reorder rewrites one row. Deleting a board cascades its columns; the cascade of
  * a non-empty column's cards + comments lands with the cards ticket (D5).
+ * `updatedAt` is bumped by every rename and reorder so a lane change moves the
+ * board's `max(updated_at)` version and other viewers' polls notice it (D4).
  */
 export const columns = pgTable("columns", {
   id: text("id")
@@ -149,6 +151,7 @@ export const columns = pgTable("columns", {
   name: text("name").notNull(),
   position: text("position").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export type Column = typeof columns.$inferSelect;

@@ -1,20 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  COMMENTS_POLL_MS,
+  boardKeys,
+  fetchComments,
+  type ThreadComment,
+} from "./board-data";
+import { isProvisional, provisionalId, withCommentCount } from "./board-edits";
+import { patchBoard, patchComments, useBoard } from "./board-context";
 import { Avatar, displayName } from "./avatar";
 import { addCommentAction, deleteCommentAction } from "./actions";
-
-/**
- * A comment as the read API serves it: dates arrive JSON-serialized as ISO
- * strings, and the author is null for a former member whose account was removed.
- */
-type ThreadComment = {
-  id: string;
-  authorId: string | null;
-  body: string;
-  createdAt: string;
-  author: { id: string; name: string | null; email: string; image: string | null } | null;
-};
 
 /** A short, locale-formatted timestamp for a comment. */
 function formatWhen(iso: string): string {
@@ -30,70 +27,78 @@ function formatWhen(iso: string): string {
 /**
  * The comment thread inside a card's detail view: the card's comments (newest at
  * the bottom), a box to post a plain-text comment, and a delete control on each
- * comment the current user may remove — their own, or any as a board owner. The
- * thread is fetched from `GET /api/cards/:id/comments` when the card opens and
- * re-fetched after each add/delete; every mutation routes through a
- * membership-checked server action.
+ * comment the current user may remove — their own, or any as a board owner.
+ *
+ * The thread is polled from `GET /api/cards/:id/comments` every 5s while the card
+ * is open, and pauses with the tab (D4) — so two people reading the same card see
+ * each other's replies without touching anything. Posting and deleting patch the
+ * cached thread (and the card face's count) immediately, then reconcile when the
+ * write settles.
  */
-export function CommentThread({
-  boardId,
-  cardId,
-  currentUserId,
-  isOwner,
-}: {
-  boardId: string;
-  cardId: string;
-  currentUserId: string;
-  isOwner: boolean;
-}) {
-  const [comments, setComments] = useState<ThreadComment[] | null>(null);
+export function CommentThread({ cardId }: { cardId: string }) {
+  const { boardId, currentUserId, isOwner, members, run } = useBoard();
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
 
-  const load = useCallback(async () => {
-    const res = await fetch(`/api/cards/${cardId}/comments`);
-    if (!res.ok) {
-      setError("Couldn't load comments.");
-      return;
-    }
-    const data = (await res.json()) as { comments: ThreadComment[] };
-    setComments(data.comments);
-  }, [cardId]);
+  const thread = useQuery({
+    queryKey: boardKeys.comments(cardId),
+    queryFn: ({ signal }) => fetchComments(cardId, signal),
+    refetchInterval: COMMENTS_POLL_MS,
+    // A card left open in a hidden tab polls nothing.
+    refetchIntervalInBackground: false,
+  });
+  const comments = thread.data;
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  function add(event: React.FormEvent) {
+  async function add(event: React.FormEvent) {
     event.preventDefault();
     const trimmed = body.trim();
     if (!trimmed) return;
-    startTransition(async () => {
-      const result = await addCommentAction({ boardId, cardId, body: trimmed });
-      if (result?.error) {
-        setError(result.error);
-        return;
-      }
-      setBody("");
-      setError(null);
-      await load();
+    setBody("");
+    setPending(true);
+
+    const author = members.find((member) => member.id === currentUserId) ?? null;
+    const optimistic: ThreadComment = {
+      id: provisionalId(),
+      authorId: currentUserId,
+      body: trimmed,
+      createdAt: new Date().toISOString(),
+      author,
+    };
+
+    const result = await run({
+      patches: [
+        patchComments(cardId, (held) => [...held, optimistic]),
+        patchBoard(boardId, (data) => withCommentCount(data, cardId, 1)),
+      ],
+      action: () => addCommentAction({ cardId, body: trimmed }),
     });
+    setPending(false);
+    if (result?.error) {
+      setBody(trimmed);
+      setError(result.error);
+      return;
+    }
+    setError(null);
   }
 
-  function remove(commentId: string) {
-    startTransition(async () => {
-      const result = await deleteCommentAction({ boardId, commentId });
-      if (result?.error) {
-        setError(result.error);
-        return;
-      }
-      setError(null);
-      await load();
+  async function remove(commentId: string) {
+    setPending(true);
+    const result = await run({
+      patches: [
+        patchComments(cardId, (held) => held.filter((comment) => comment.id !== commentId)),
+        patchBoard(boardId, (data) => withCommentCount(data, cardId, -1)),
+      ],
+      action: () => deleteCommentAction({ commentId }),
     });
+    setPending(false);
+    setError(result?.error ?? null);
   }
 
   function canDelete(comment: ThreadComment): boolean {
+    // A comment the server hasn't acknowledged has no id to delete by; the poll
+    // that follows the post swaps in the real one a moment later.
+    if (isProvisional(comment.id)) return false;
     return isOwner || comment.authorId === currentUserId;
   }
 
@@ -101,14 +106,21 @@ export function CommentThread({
     <section className="mt-2 border-t border-black/10 pt-2 dark:border-white/10">
       <h3 className="mb-2 text-xs font-semibold opacity-60">Comments</h3>
 
-      {comments === null ? (
-        <p className="text-xs opacity-50">Loading…</p>
+      {comments === undefined ? (
+        <p className="text-xs opacity-50">
+          {thread.isError ? "Couldn't load comments." : "Loading…"}
+        </p>
       ) : comments.length === 0 ? (
         <p className="text-xs opacity-50">No comments yet.</p>
       ) : (
         <ul className="space-y-2">
           {comments.map((comment) => (
-            <li key={comment.id} className="flex items-start gap-2 text-sm">
+            <li
+              key={comment.id}
+              className={`flex items-start gap-2 text-sm ${
+                isProvisional(comment.id) ? "opacity-60" : ""
+              }`}
+            >
               {comment.author ? (
                 <Avatar user={comment.author} size={20} />
               ) : (
@@ -148,7 +160,7 @@ export function CommentThread({
       <form onSubmit={add} className="mt-2 space-y-1">
         <textarea
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={(event) => setBody(event.target.value)}
           rows={2}
           maxLength={5000}
           placeholder="Add a comment…"

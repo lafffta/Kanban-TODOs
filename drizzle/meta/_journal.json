@@ -57,6 +57,13 @@
       "when": 1784924346036,
       "tag": "0007_silky_layla_miller",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784926648120,
+      "tag": "0008_orange_red_hulk",
+      "breakpoints": true
     }
   ]
 }

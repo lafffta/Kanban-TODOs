@@ -5,8 +5,8 @@ with a second account, which no test in `vitest run` can cover.
 
 ## Manual demo steps
 
-These three acceptance criteria are the only ones left unchecked across tickets
-01–08. All three tickets are code-complete; these are hands-on verification gates.
+These four acceptance criteria are the only ones left unchecked across tickets
+01–09. All four tickets are code-complete; these are hands-on verification gates.
 
 ### 1. Ticket 06 — move a task on a phone
 
@@ -71,10 +71,35 @@ What to check:
 - As owner, **change their role and remove them**. Removing clears any cards they
   were assigned; their comments stay.
 
+### 4. Ticket 09 — two people on one board
+
+> `- [ ] A moves a card, B sees it in ~4s; concurrent same-card drag settles
+> last-write-wins with no duplicate/precision collision (demo)` —
+> `.scratch/kanban-task-tracker/issues/09-near-real-time-polling.md`
+
+Needs the same two accounts as demos 2 and 3, both with the board open side by side.
+
+Most of the loop was verified against a running server and a real browser: the
+version endpoint ticks every 4s and pauses when the tab is hidden, the heavy board
+payload is fetched *only* when the token moves, a card moved out of band showed up
+in the other tab in ~2s, a dropped card doesn't snap back across two poll cycles,
+and an open card's thread polls every 5s. What no single browser can show:
+
+- **Two humans, one board.** A drags a card; B — who is only *watching* — sees it
+  land within ~4s, with no reload and no flicker on B's side either.
+- **The concurrent same-card drag.** Both people grab the *same* card at the same
+  moment and drop it in different lanes. Expect last-write-wins: both tabs settle
+  on the same lane within a poll, exactly one row moved, no duplicate card and no
+  two cards sharing a `position` (the fractional-index jitter, D3).
+- **Editing while someone else's write is in flight.** Type in a card's editor
+  while B is moving cards; your open editor must not be clobbered by a poll.
+- **A hidden tab catching up.** Leave B's tab in the background for a minute while
+  A makes changes; on return B should re-sync within one poll.
+
 ## Notes
 
 - There is no live deployment to run these against right now. The app targets
   **Vercel + Neon** in production (see `.env.example`); a local run needs a Postgres
   on `DATABASE_URL` and `npm run db:migrate` before `npm run dev`.
-- Once all three demos pass, tick the boxes in the ticket files above and this file
+- Once all four demos pass, tick the boxes in the ticket files above and this file
   can go away.
