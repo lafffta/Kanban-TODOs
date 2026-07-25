@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -14,33 +14,17 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
-import type { Column } from "@/db/schema";
-import type { BoardMemberProfile } from "@/db/boards";
-import type { CardWithAssignee } from "@/db/cards";
+import type { BoardCard } from "./board-data";
+import { groupByColumn, orderedColumns, withMovedCard, type Lanes } from "./board-edits";
+import { patchBoard, useBoard } from "./board-context";
 import { ColumnLane, type MoveTarget } from "./column-lane";
 import { CardFace } from "./card-item";
 import { CreateColumnForm } from "./create-column-form";
 import { moveCardAction } from "./actions";
 
-/** The visible cards for one column, in order, keyed by column id. */
-type Lanes = Record<string, CardWithAssignee[]>;
-
-/** Group the board's cards into per-column lanes, each already position-ordered. */
-function groupByColumn(columns: Column[], cards: CardWithAssignee[]): Lanes {
-  const lanes: Lanes = {};
-  for (const column of columns) lanes[column.id] = [];
-  for (const card of cards) (lanes[card.columnId] ??= []).push(card);
-  return lanes;
-}
-
-/** A stable signature of the server's card order, so we only re-sync on real change. */
-function laneSignature(cards: CardWithAssignee[]): string {
-  return cards.map((c) => `${c.columnId}:${c.id}:${c.position}`).join("|");
-}
-
 /** The card ids bracketing `id` in an ordered lane — `null` at either end. */
 function neighbours(
-  cards: CardWithAssignee[],
+  cards: BoardCard[],
   id: string,
 ): { beforeId: string | null; afterId: string | null } {
   const index = cards.findIndex((card) => card.id === id);
@@ -60,58 +44,40 @@ function neighbours(
  * used: on a touch device it also fires and its distance constraint would start a
  * drag mid-swipe, before the long-press elapses — defeating vertical page scroll.
  *
- * Local `lanes` state mirrors the server's cards so a drag reorders instantly;
- * `onDragOver` moves the card between lanes for live feedback, and `onDragEnd`
- * persists the drop as neighbour ids via `moveCardAction`. The action revalidates
- * the board, and the effect below re-syncs local state to that authoritative order.
+ * Lanes are derived from the polled board payload (ticket 09), so another member's
+ * move appears here within a poll. `dragLanes` shadows that derivation for exactly
+ * as long as a drag is being made and its write is in flight: `onDragOver` moves the
+ * card between lanes for live feedback, `onDragEnd` persists the drop as neighbour
+ * ids, and the optimistic cache patch has already taken over by the time the shadow
+ * is dropped — so the card never snaps back to where it came from.
  */
 export function BoardView({
-  boardId,
-  columns,
-  cards,
-  members,
-  currentUserId,
-  isOwner,
   filterAssigneeId,
 }: {
-  boardId: string;
-  columns: Column[];
-  /**
-   * *Every* card on the board, not just the visible ones — ordering has to be
-   * computed against the full lane. Filtering happens at render (`filterAssigneeId`)
-   * so a drop between two visible cards still resolves its true neighbours, which
-   * may be filtered-out cards sitting in the gap.
-   */
-  cards: CardWithAssignee[];
-  members: BoardMemberProfile[];
-  currentUserId: string;
-  isOwner: boolean;
   /** When set, only this user's assigned cards are shown ("my cards", ?mine=1). */
   filterAssigneeId: string | null;
 }) {
+  const { boardId, board, run, outOfSync } = useBoard();
+
+  const columns = useMemo(() => orderedColumns(board.columns), [board.columns]);
   const byId = useMemo(() => {
-    const map = new Map<string, CardWithAssignee>();
-    for (const card of cards) map.set(card.id, card);
+    const map = new Map<string, BoardCard>();
+    for (const card of board.cards) map.set(card.id, card);
     return map;
-  }, [cards]);
+  }, [board.cards]);
 
-  const [lanes, setLanes] = useState<Lanes>(() => groupByColumn(columns, cards));
+  // *Every* card on the board, not just the visible ones — ordering has to be
+  // computed against the full lane. Filtering happens at render, so a drop between
+  // two visible cards still resolves its true neighbours, which may be cards the
+  // filter hides.
+  const polledLanes = useMemo(
+    () => groupByColumn(columns, board.cards),
+    [columns, board.cards],
+  );
+
+  const [dragLanes, setDragLanes] = useState<Lanes | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [isMoving, startTransition] = useTransition();
-
-  // Re-sync to the server's order whenever it changes and nothing is in flight —
-  // the authoritative positions land here after each `moveCardAction` revalidates.
-  //
-  // `isMoving` matters as much as `activeId`: drag end clears `activeId` *before*
-  // the move has been persisted, so gating on the drag alone would re-run this with
-  // the pre-move `cards` still in props and visibly snap the card back to its old
-  // slot until revalidation landed. The transition stays pending until the new
-  // server data arrives, which is exactly the window we must not re-sync in.
-  const signature = laneSignature(cards);
-  useEffect(() => {
-    if (!activeId && !isMoving) setLanes(groupByColumn(columns, cards));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, activeId, isMoving]);
+  const lanes = dragLanes ?? polledLanes;
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -124,7 +90,7 @@ export function BoardView({
    * Whether a card shows under the current filter. Lanes always hold every card so
    * neighbour lookup stays correct; only rendering narrows.
    */
-  function isVisible(card: CardWithAssignee): boolean {
+  function isVisible(card: BoardCard): boolean {
     return filterAssigneeId === null || card.assigneeId === filterAssigneeId;
   }
 
@@ -138,6 +104,7 @@ export function BoardView({
 
   function onDragStart(event: DragStartEvent) {
     setActiveId(String(event.active.id));
+    setDragLanes(polledLanes);
   }
 
   // Live cross-column feedback: as the pointer enters another lane, pull the card
@@ -151,11 +118,12 @@ export function BoardView({
     const to = laneOf(overId);
     if (!from || !to || from === to) return;
 
-    setLanes((prev) => {
-      const fromCards = prev[from];
-      const toCards = prev[to];
+    setDragLanes((prev) => {
+      const current = prev ?? polledLanes;
+      const fromCards = current[from];
+      const toCards = current[to];
       const moving = fromCards.find((card) => card.id === activeId);
-      if (!moving) return prev;
+      if (!moving) return current;
 
       // Dropping onto the lane itself (its empty area) appends; onto a card inserts
       // just before that card.
@@ -163,7 +131,7 @@ export function BoardView({
       const insertAt = overIndex === -1 ? toCards.length : overIndex;
 
       return {
-        ...prev,
+        ...current,
         [from]: fromCards.filter((card) => card.id !== activeId),
         [to]: [...toCards.slice(0, insertAt), moving, ...toCards.slice(insertAt)],
       };
@@ -174,37 +142,46 @@ export function BoardView({
     const { active, over } = event;
     const draggedId = String(active.id);
     setActiveId(null);
-    if (!over) return;
 
-    const lane = laneOf(draggedId);
-    if (!lane) return;
+    const lane = over ? laneOf(draggedId) : undefined;
+    if (!lane) {
+      setDragLanes(null);
+      return;
+    }
 
     // Settle the final in-lane order (cross-lane placement already happened in
     // onDragOver), then read the drop's neighbours to persist.
     let settled = lanes;
-    const overId = String(over.id);
+    const overId = String(over!.id);
     const laneCards = lanes[lane];
     const oldIndex = laneCards.findIndex((card) => card.id === draggedId);
     const overIndex = laneCards.findIndex((card) => card.id === overId);
     if (overIndex !== -1 && oldIndex !== overIndex) {
-      const reordered = arrayMove(laneCards, oldIndex, overIndex);
-      settled = { ...lanes, [lane]: reordered };
-      setLanes(settled);
+      settled = { ...lanes, [lane]: arrayMove(laneCards, oldIndex, overIndex) };
     }
+    setDragLanes(settled);
 
     const { beforeId, afterId } = neighbours(settled[lane], draggedId);
 
-    // Skip the write when the drop lands the card exactly where the server already
-    // has it (same lane, same neighbours) — a no-op drag shouldn't touch a row.
+    // Skip the write when the drop lands the card exactly where it already is
+    // (same lane, same neighbours) — a no-op drag shouldn't touch a row.
     const original = byId.get(draggedId);
-    const base = neighbours(groupByColumn(columns, cards)[lane] ?? [], draggedId);
+    const base = neighbours(polledLanes[lane] ?? [], draggedId);
     if (original?.columnId === lane && base.beforeId === beforeId && base.afterId === afterId) {
+      setDragLanes(null);
       return;
     }
 
-    startTransition(() =>
-      moveCardAction({ boardId, cardId: draggedId, columnId: lane, beforeId, afterId }),
-    );
+    void run({
+      patches: [
+        patchBoard(boardId, (data) =>
+          withMovedCard(data, { cardId: draggedId, columnId: lane, beforeId, afterId }),
+        ),
+      ],
+      action: () => moveCardAction({ cardId: draggedId, columnId: lane, beforeId, afterId }),
+      // Hold the dropped order on screen until the write settles; by then the
+      // optimistic patch is in the cache, so the hand-off is invisible.
+    }).finally(() => setDragLanes(null));
   }
 
   const activeCard = activeId ? byId.get(activeId) : null;
@@ -216,8 +193,20 @@ export function BoardView({
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDragEnd={onDragEnd}
-      onDragCancel={() => setActiveId(null)}
+      onDragCancel={() => {
+        setActiveId(null);
+        setDragLanes(null);
+      }}
     >
+      {outOfSync && (
+        <p
+          role="status"
+          className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs"
+        >
+          Not syncing — this board may be out of date.
+        </p>
+      )}
+
       <div className="flex flex-1 gap-4 overflow-x-auto pb-4">
         {columns.map((column, i) => {
           // Neighbours the column lands between when nudged one step. Moving left
@@ -233,19 +222,19 @@ export function BoardView({
           return (
             <ColumnLane
               key={column.id}
-              boardId={boardId}
               column={column}
               cards={(lanes[column.id] ?? []).filter(isVisible)}
-              members={members}
-              currentUserId={currentUserId}
-              isOwner={isOwner}
               moveLeft={moveLeft}
               moveRight={moveRight}
             />
           );
         })}
-        <CreateColumnForm boardId={boardId} />
+        <CreateColumnForm />
       </div>
+
+      {columns.length === 0 && (
+        <p className="text-sm opacity-60">No columns yet. Add your first lane above.</p>
+      )}
 
       <DragOverlay>{activeCard ? <CardFace card={activeCard} dragging /> : null}</DragOverlay>
     </DndContext>

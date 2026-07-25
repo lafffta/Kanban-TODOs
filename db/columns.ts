@@ -78,7 +78,7 @@ export async function renameColumn(input: {
   const column = await requireColumnMember(input.columnId, input.userId);
   const [updated] = await db
     .update(columns)
-    .set({ name: input.name })
+    .set({ name: input.name, updatedAt: new Date() })
     .where(eq(columns.id, column.id))
     .returning();
   return updated;
@@ -117,7 +117,7 @@ export async function reorderColumn(input: {
 
   const [updated] = await db
     .update(columns)
-    .set({ position: keyBetween(before, after) })
+    .set({ position: keyBetween(before, after), updatedAt: new Date() })
     .where(eq(columns.id, column.id))
     .returning();
   return updated;

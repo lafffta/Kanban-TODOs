@@ -40,6 +40,16 @@ import {
 import { requireUserId } from "@/app/session";
 import { redirectOnBoardDenial } from "./access";
 
+/**
+ * The board's writes. Since ticket 09 the *content* actions — columns, cards,
+ * comments — no longer `revalidatePath`: the board they'd refresh is now held in
+ * the client's query cache, which patches optimistically and re-reads on settle
+ * (D3/D4). Pushing a whole RSC payload back on every keystroke-sized edit would
+ * be a second, slower copy of the same news.
+ *
+ * The *governance* actions below — invites and membership — still revalidate,
+ * because the members panel they feed is server-rendered and isn't polled.
+ */
 export type ColumnFormState = { error: string } | undefined;
 export type CardFormState = { error: string } | undefined;
 export type CommentFormState = { error: string } | undefined;
@@ -48,38 +58,33 @@ export type MemberFormState = { error: string } | undefined;
 export type InviteFormState = { error?: string; token?: string } | undefined;
 
 /** Create a column at the end of a board's lanes (member-permitted). */
-export async function createColumnAction(
-  boardId: string,
-  _prev: ColumnFormState,
-  formData: FormData,
-): Promise<ColumnFormState> {
+export async function createColumnAction(input: {
+  boardId: string;
+  name: string;
+}): Promise<ColumnFormState> {
   const userId = await requireUserId();
-  const parsed = columnNameSchema.safeParse({ name: formData.get("name") });
+  const parsed = columnNameSchema.safeParse({ name: input.name });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid column name." };
   }
   await redirectOnBoardDenial(() =>
-    createColumn({ boardId, name: parsed.data.name, userId }),
+    createColumn({ boardId: input.boardId, name: parsed.data.name, userId }),
   );
-  revalidatePath(`/boards/${boardId}`);
 }
 
 /** Rename a column (member-permitted). */
-export async function renameColumnAction(
-  boardId: string,
-  columnId: string,
-  _prev: ColumnFormState,
-  formData: FormData,
-): Promise<ColumnFormState> {
+export async function renameColumnAction(input: {
+  columnId: string;
+  name: string;
+}): Promise<ColumnFormState> {
   const userId = await requireUserId();
-  const parsed = columnNameSchema.safeParse({ name: formData.get("name") });
+  const parsed = columnNameSchema.safeParse({ name: input.name });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid column name." };
   }
   await redirectOnBoardDenial(() =>
-    renameColumn({ columnId, name: parsed.data.name, userId }),
+    renameColumn({ columnId: input.columnId, name: parsed.data.name, userId }),
   );
-  revalidatePath(`/boards/${boardId}`);
 }
 
 /**
@@ -88,7 +93,6 @@ export async function renameColumnAction(
  * the db layer generates one fractional key and rewrites the single moved row.
  */
 export async function reorderColumnAction(input: {
-  boardId: string;
   columnId: string;
   beforeId: string | null;
   afterId: string | null;
@@ -102,63 +106,61 @@ export async function reorderColumnAction(input: {
       userId,
     }),
   );
-  revalidatePath(`/boards/${input.boardId}`);
 }
 
 /** Delete a column (member-permitted). Confirm dialog lives in the UI. */
 export async function deleteColumnAction(input: {
-  boardId: string;
   columnId: string;
 }): Promise<void> {
   const userId = await requireUserId();
   await redirectOnBoardDenial(() =>
     deleteColumn({ columnId: input.columnId, userId }),
   );
-  revalidatePath(`/boards/${input.boardId}`);
 }
 
 /** Create a card at the end of a column (member-permitted). */
-export async function createCardAction(
-  boardId: string,
-  columnId: string,
-  _prev: CardFormState,
-  formData: FormData,
-): Promise<CardFormState> {
+export async function createCardAction(input: {
+  boardId: string;
+  columnId: string;
+  title: string;
+}): Promise<CardFormState> {
   const userId = await requireUserId();
-  const parsed = cardTitleSchema.safeParse({ title: formData.get("title") });
+  const parsed = cardTitleSchema.safeParse({ title: input.title });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid card title." };
   }
   await redirectOnBoardDenial(() =>
-    createCard({ boardId, columnId, title: parsed.data.title, userId }),
+    createCard({
+      boardId: input.boardId,
+      columnId: input.columnId,
+      title: parsed.data.title,
+      userId,
+    }),
   );
-  revalidatePath(`/boards/${boardId}`);
 }
 
 /** Edit a card's title and description (member-permitted). */
-export async function updateCardAction(
-  boardId: string,
-  cardId: string,
-  _prev: CardFormState,
-  formData: FormData,
-): Promise<CardFormState> {
+export async function updateCardAction(input: {
+  cardId: string;
+  title: string;
+  description: string;
+}): Promise<CardFormState> {
   const userId = await requireUserId();
   const parsed = cardContentSchema.safeParse({
-    title: formData.get("title"),
-    description: formData.get("description") ?? "",
+    title: input.title,
+    description: input.description,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid card." };
   }
   await redirectOnBoardDenial(() =>
     updateCard({
-      cardId,
+      cardId: input.cardId,
       title: parsed.data.title,
       description: parsed.data.description,
       userId,
     }),
   );
-  revalidatePath(`/boards/${boardId}`);
 }
 
 /**
@@ -166,7 +168,6 @@ export async function updateCardAction(
  * only offers current members, so the db-layer membership check is a backstop.
  */
 export async function assignCardAction(input: {
-  boardId: string;
   cardId: string;
   assigneeId: string | null;
 }): Promise<void> {
@@ -174,7 +175,6 @@ export async function assignCardAction(input: {
   await redirectOnBoardDenial(() =>
     assignCard({ cardId: input.cardId, assigneeId: input.assigneeId, userId }),
   );
-  revalidatePath(`/boards/${input.boardId}`);
 }
 
 /**
@@ -184,7 +184,6 @@ export async function assignCardAction(input: {
  * between; the db layer generates one fractional key and rewrites the single row.
  */
 export async function moveCardAction(input: {
-  boardId: string;
   cardId: string;
   columnId: string;
   beforeId: string | null;
@@ -200,26 +199,20 @@ export async function moveCardAction(input: {
       userId,
     }),
   );
-  revalidatePath(`/boards/${input.boardId}`);
 }
 
 /** Delete a card (member-permitted). Confirm dialog lives in the UI. */
-export async function deleteCardAction(input: {
-  boardId: string;
-  cardId: string;
-}): Promise<void> {
+export async function deleteCardAction(input: { cardId: string }): Promise<void> {
   const userId = await requireUserId();
   await redirectOnBoardDenial(() => deleteCard({ cardId: input.cardId, userId }));
-  revalidatePath(`/boards/${input.boardId}`);
 }
 
 /**
  * Add a plain-text comment to a card (any member). Returns a form-state error on an
- * empty/oversized body; the card detail view reloads the thread on success and the
- * revalidate refreshes the card face's comment count.
+ * empty/oversized body; the thread shows the comment optimistically and the poll
+ * behind it (5s) brings the stored row — and the card face's count — into line.
  */
 export async function addCommentAction(input: {
-  boardId: string;
   cardId: string;
   body: string;
 }): Promise<CommentFormState> {
@@ -231,7 +224,6 @@ export async function addCommentAction(input: {
   await redirectOnBoardDenial(() =>
     addComment({ cardId: input.cardId, body: parsed.data.body, userId }),
   );
-  revalidatePath(`/boards/${input.boardId}`);
 }
 
 /**
@@ -242,7 +234,6 @@ export async function addCommentAction(input: {
  * returned as a form error the thread can display rather than thrown as a 500.
  */
 export async function deleteCommentAction(input: {
-  boardId: string;
   commentId: string;
 }): Promise<CommentFormState> {
   const userId = await requireUserId();
@@ -259,7 +250,6 @@ export async function deleteCommentAction(input: {
     }
     throw error;
   }
-  revalidatePath(`/boards/${input.boardId}`);
 }
 
 /** What a refused membership change means to the owner who attempted it. */

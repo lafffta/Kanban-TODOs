@@ -11,10 +11,10 @@ only when something changed. Mutations are optimistic and reconcile with polling
 
 **Blocked by:** 08 — Sharing / invites.
 
-**Status:** ready-for-agent
+**Status:** done (bar the demo)
 
-- [ ] Open board polls every 4s; open card's comments poll every 5s; both pause when the tab is hidden
-- [ ] `GET /api/boards/:id/version` returns `max(updated_at)` and guards full-board refetch
-- [ ] Mutations apply optimistically and reconcile on settle without flicker (cancel/suppress-in-flight/invalidate)
-- [ ] Stale polls gated by a local monotonic version
+- [x] Open board polls every 4s; open card's comments poll every 5s; both pause when the tab is hidden
+- [x] `GET /api/boards/:id/version` returns `max(updated_at)` and guards full-board refetch
+- [x] Mutations apply optimistically and reconcile on settle without flicker (cancel/suppress-in-flight/invalidate)
+- [x] Stale polls gated by a local monotonic version
 - [ ] A moves a card, B sees it in ~4s; concurrent same-card drag settles last-write-wins with no duplicate/precision collision (demo)

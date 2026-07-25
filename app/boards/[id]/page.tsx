@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getBoard, listBoardMembers, requireBoardMember } from "@/db/boards";
-import { listColumns } from "@/db/columns";
-import { listCards } from "@/db/cards";
+import { requireBoardMember } from "@/db/boards";
+import { getBoardSnapshot } from "@/db/board-snapshot";
 import { listPendingInvites } from "@/db/invites";
 import { requireUserId } from "@/app/session";
 import { redirectOnBoardDenial } from "./access";
+import { serializeBoard } from "./board-data";
+import { BoardProvider } from "./board-context";
 import { BoardView } from "./board-view";
 import { MembersPanel } from "./members-panel";
 
@@ -14,6 +15,11 @@ import { MembersPanel } from "./members-panel";
 // to their boards list. Members create/rename/reorder/delete columns and
 // create/edit/assign/delete cards here; the "my cards" filter (?mine=1) narrows the
 // board to the current user's assigned cards (ticket 05).
+//
+// The board is read once here so the first paint needs no round trip, then handed
+// to `BoardProvider`, which polls it from `/api/boards/:id` from that point on
+// (ticket 09). The members panel below stays server-rendered: invites and roles are
+// owner-only governance, not the shared content the polling loop is for.
 export default async function BoardPage({
   params,
   searchParams,
@@ -27,14 +33,8 @@ export default async function BoardPage({
   const membership = await redirectOnBoardDenial(() => requireBoardMember(id, userId));
   const isOwner = membership.role === "owner";
 
-  const board = await getBoard(id);
-  if (!board) redirect("/boards");
-
-  const [columns, allCards, members] = await Promise.all([
-    listColumns(id),
-    listCards(id),
-    listBoardMembers(id),
-  ]);
+  const snapshot = await getBoardSnapshot(id);
+  if (!snapshot) redirect("/boards");
 
   // Invite tokens are owner-only, so a member's page never carries them (ticket 08).
   const invites = isOwner ? await listPendingInvites(id, userId) : [];
@@ -50,7 +50,7 @@ export default async function BoardPage({
           <Link href="/boards" className="text-sm opacity-60 hover:opacity-100">
             ← Boards
           </Link>
-          <h1 className="mt-1 text-2xl font-semibold">{board.name}</h1>
+          <h1 className="mt-1 text-2xl font-semibold">{snapshot.board.name}</h1>
         </div>
         <Link
           href={onlyMine ? `/boards/${id}` : `/boards/${id}?mine=1`}
@@ -66,7 +66,7 @@ export default async function BoardPage({
 
       <MembersPanel
         boardId={id}
-        members={members}
+        members={snapshot.members}
         invites={invites.map((invite) => ({
           id: invite.id,
           email: invite.email,
@@ -74,25 +74,19 @@ export default async function BoardPage({
           token: invite.token,
           expiresAt: invite.expiresAt.toISOString(),
         }))}
-        creatorId={board.ownerId}
+        creatorId={snapshot.board.ownerId}
         currentUserId={userId}
         isOwner={isOwner}
       />
 
-      <BoardView
+      <BoardProvider
         boardId={id}
-        columns={columns}
-        cards={allCards}
-        members={members}
         currentUserId={userId}
         isOwner={isOwner}
-        filterAssigneeId={onlyMine ? userId : null}
-      />
-
-
-      {columns.length === 0 && (
-        <p className="text-sm opacity-60">No columns yet. Add your first lane above.</p>
-      )}
+        initialBoard={serializeBoard(snapshot)}
+      >
+        <BoardView filterAssigneeId={onlyMine ? userId : null} />
+      </BoardProvider>
     </main>
   );
 }
