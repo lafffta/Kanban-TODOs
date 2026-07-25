@@ -1,0 +1,6 @@
+# Never upload local env files into the deploy bundle — Vercel injects env
+# vars from project settings. A stray .env here overrides them on any
+# environment that lacks a Vercel-scoped value (e.g. preview).
+.env
+.env.*
+!.env.example
