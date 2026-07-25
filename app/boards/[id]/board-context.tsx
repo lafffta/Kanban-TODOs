@@ -8,6 +8,8 @@ import {
   type QueryKey,
 } from "@tanstack/react-query";
 import type { BoardMemberProfile } from "@/db/boards";
+import { useOnline } from "@/app/pwa/connection";
+import { useOfflineWriteGate } from "@/app/pwa/offline-write-gate";
 import {
   BOARD_POLL_MS,
   boardKeys,
@@ -72,6 +74,8 @@ type BoardControls = {
   /** The live board — server-rendered on first paint, polled from then on. */
   board: BoardData;
   members: BoardMemberProfile[];
+  /** False when the device has no network: the board is stale and read-only (D8). */
+  online: boolean;
   /** True while the polling loop is failing (offline, or access just revoked). */
   outOfSync: boolean;
   /** Run a board write with the optimistic + reconcile protocol. */
@@ -115,6 +119,7 @@ export function BoardProvider({
   currentUserId,
   isOwner,
   initialBoard,
+  renderedAt,
   children,
 }: {
   boardId: string;
@@ -122,10 +127,14 @@ export function BoardProvider({
   isOwner: boolean;
   /** The server-rendered payload, so the first paint needs no fetch. */
   initialBoard: BoardData;
+  /** When the server read that payload — see `initialDataUpdatedAt` below. */
+  renderedAt: number;
   children: React.ReactNode;
 }) {
   const queryClient = useQueryClient();
   const [reconciler] = useState<Reconciler>(createReconciler);
+  const online = useOnline();
+  const refuseWhileOffline = useOfflineWriteGate();
 
   const boardQuery = useQuery({
     queryKey: boardKeys.board(boardId),
@@ -139,6 +148,11 @@ export function BoardProvider({
       return { ...fetched, stampedAt };
     },
     initialData: () => ({ ...initialBoard, stampedAt: 0 }),
+    // Offline, this page came out of the service worker's cache, so the payload
+    // it carries can be older than the one persisted to IndexedDB. Dating it by
+    // when the server actually read it lets the restored cache win when it is in
+    // fact newer, instead of every launch resetting the board to the cached HTML.
+    initialDataUpdatedAt: renderedAt,
     // Never stale on its own: the version guard below is the only thing that
     // decides this payload needs re-reading.
     staleTime: Infinity,
@@ -201,6 +215,11 @@ export function BoardProvider({
   const { mutateAsync } = mutation;
   const run = useCallback(
     async (write: BoardMutation): Promise<ActionResult> => {
+      // Offline is read-only (D8): refused before the optimistic patch is even
+      // applied, so nothing is ever shown as saved that wasn't.
+      const refused = refuseWhileOffline();
+      if (refused) return { error: refused };
+
       try {
         return await mutateAsync(write);
       } catch {
@@ -209,7 +228,7 @@ export function BoardProvider({
         return { error: "That didn't save. Check your connection and try again." };
       }
     },
-    [mutateAsync],
+    [mutateAsync, refuseWhileOffline],
   );
 
   return (
@@ -220,7 +239,10 @@ export function BoardProvider({
         isOwner,
         board,
         members: board.members,
-        outOfSync: versionQuery.isError,
+        online,
+        // Offline has its own banner saying the same thing more precisely; this
+        // notice is for the case the network is up but the board isn't reachable.
+        outOfSync: versionQuery.isError && online,
         run,
       }}
     >

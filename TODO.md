@@ -5,8 +5,8 @@ with a second account, which no test in `vitest run` can cover.
 
 ## Manual demo steps
 
-These four acceptance criteria are the only ones left unchecked across tickets
-01–09. All four tickets are code-complete; these are hands-on verification gates.
+These five acceptance criteria are the only ones left unchecked across tickets
+01–10. All five tickets are code-complete; these are hands-on verification gates.
 
 ### 1. Ticket 06 — move a task on a phone
 
@@ -96,10 +96,43 @@ and an open card's thread polls every 5s. What no single browser can show:
 - **A hidden tab catching up.** Leave B's tab in the background for a minute while
   A makes changes; on return B should re-sync within one poll.
 
+### 5. Ticket 10 — install it and open it offline
+
+> `- [ ] Mobile layout: … install to home screen and open offline (demo)` —
+> `.scratch/kanban-task-tracker/issues/10-pwa-offline-mobile-polish.md`
+
+Needs a real phone. **The service worker and the install prompt only exist in a
+production build**, so this is `npm run build && npm start` (with
+`AUTH_TRUST_HOST=true`, see `.env.example`), not `npm run dev` — and the device has
+to reach the machine over a secure context, so a tunnel with an HTTPS URL or a
+deployment, not a bare LAN address.
+
+Most of the loop was verified against a production build in a phone-sized browser:
+the worker registers at scope `/`, the board opens with the network cut — straight
+to the last-seen board, behind the "Offline" banner — a save from the card sheet is
+refused with the toast, and the card detail renders as a full-screen sheet on a
+phone and a side panel on a desktop. What no headless browser produces:
+
+- **The install prompt itself.** Chromium fires `beforeinstallprompt` only for a
+  real installable context; that event is what reveals the "Install app" button
+  next to the boards list. Tap it, accept, and confirm the app lands on the home
+  screen with the kanban icon.
+- **Launched from the home screen.** It should open with no browser chrome
+  (`display: standalone`) and the slate status bar, straight to your boards.
+- **Then with the network off** (aeroplane mode). It should open to the last board
+  you had open, stale and read-only, with the "Offline" banner — and every attempt
+  to change something refused with the toast, nothing silently lost.
+- **Touch feel.** Lanes scroll-snap one at a time and each lane scrolls its own
+  cards; a long-press still lifts a card and an ordinary swipe still scrolls
+  (ticket 06's demo covers the drag itself).
+- **Signing out clears the device.** Sign out, kill the network, launch again: it
+  must *not* open anyone's board — the persisted cache and the worker's pages are
+  dropped on sign-out.
+
 ## Notes
 
 - There is no live deployment to run these against right now. The app targets
   **Vercel + Neon** in production (see `.env.example`); a local run needs a Postgres
   on `DATABASE_URL` and `npm run db:migrate` before `npm run dev`.
-- Once all four demos pass, tick the boxes in the ticket files above and this file
+- Once all five demos pass, tick the boxes in the ticket files above and this file
   can go away.

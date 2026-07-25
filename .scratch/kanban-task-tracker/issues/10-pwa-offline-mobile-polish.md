@@ -12,10 +12,16 @@ side panel on desktop, touch/scroll tuning.
 
 **Blocked by:** 09 — Near-real-time polling.
 
-**Status:** ready-for-agent
+**Status:** done (bar the demo)
 
-- [ ] Manifest (`display: standalone`, icons, theme color) + app-shell service worker, network-first data
-- [ ] Query cache persisted to IndexedDB; launching offline opens the last-seen board read-only
-- [ ] "Offline" banner shows offline; mutations are blocked with a toast
-- [ ] Custom install button via `beforeinstallprompt`
+- [x] Manifest (`display: standalone`, icons, theme color) + app-shell service worker, network-first data
+- [x] Query cache persisted to IndexedDB; launching offline opens the last-seen board read-only
+- [x] "Offline" banner shows offline; mutations are blocked with a toast
+- [x] Custom install button via `beforeinstallprompt`
 - [ ] Mobile layout: horizontally-scrolling columns, full-screen card sheet on mobile / side panel on desktop; install to home screen and open offline (demo)
+
+Everything but the home-screen install was exercised against a production build in a
+real (phone-sized) browser: the worker registers at scope `/`, a launch with the
+network cut opens the last-seen board behind the "Offline" banner, and a save from
+the card sheet is refused with the toast. What a headless browser can't produce is
+`beforeinstallprompt` itself — see `TODO.md` for the device demo.

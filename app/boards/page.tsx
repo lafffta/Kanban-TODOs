@@ -2,7 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/auth";
 import { listBoardsForUser } from "@/db/boards";
+import { InstallButton } from "@/app/pwa/install-button";
+import { LastBoardLaunch } from "@/app/pwa/last-board-launch";
+import { OfflineCopyWarmer } from "@/app/pwa/service-worker";
 import { CreateBoardForm } from "./create-board-form";
+import { SignOutButton } from "./sign-out-button";
 
 // Protected page: gated by the session. Lists the boards the signed-in user is a
 // member of and lets them create one. Membership scoping (listBoardsForUser)
@@ -14,26 +18,29 @@ export default async function BoardsPage() {
   const boards = await listBoardsForUser(session.user.id);
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 space-y-8 p-8">
+    <main className="mx-auto w-full max-w-2xl flex-1 space-y-8 overflow-y-auto p-8">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Your boards</h1>
           <p className="mt-1 text-sm opacity-60">Signed in as {session.user.email}</p>
         </div>
-        <form
-          action={async () => {
-            "use server";
-            await signOut({ redirectTo: "/sign-in" });
-          }}
-        >
-          <button
-            type="submit"
-            className="rounded-lg border border-black/15 px-4 py-2 text-sm font-medium dark:border-white/20"
-          >
-            Sign out
-          </button>
-        </form>
+        <div className="flex items-center gap-2">
+          {/* Only rendered once the browser says the app is installable (D8). */}
+          <InstallButton />
+          <SignOutButton
+            signOut={async () => {
+              "use server";
+              await signOut({ redirectTo: "/sign-in" });
+            }}
+          />
+        </div>
       </div>
+
+      {/* A launch with no network can't list boards, so it hands over to the last
+          one seen instead. Online this renders nothing. */}
+      <LastBoardLaunch />
+      {/* Where that launch lands, so it has to be openable offline. */}
+      <OfflineCopyWarmer />
 
       <CreateBoardForm />
 

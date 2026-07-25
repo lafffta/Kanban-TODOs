@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { withNewColumn } from "./board-edits";
 import { patchBoard, useBoard } from "./board-context";
+import { laneWidthClass } from "./column-lane";
 import { createColumnAction } from "./actions";
 
 /**
@@ -37,7 +38,7 @@ export function CreateColumnForm() {
   }
 
   return (
-    <form onSubmit={submit} className="w-72 shrink-0 space-y-2">
+    <form onSubmit={submit} className={`${laneWidthClass} space-y-2`}>
       <div className="flex gap-2">
         <input
           value={name}

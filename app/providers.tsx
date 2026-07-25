@@ -1,7 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import {
+  PERSIST_BUSTER,
+  PERSIST_MAX_AGE_MS,
+  createIndexedDbPersister,
+  shouldPersistQuery,
+} from "./pwa/query-persistence";
+import { ToastProvider } from "./pwa/toast";
 
 /**
  * The app's TanStack Query client (D4). Reads that need to stay fresh — the open
@@ -10,6 +18,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
  *
  * The client is created in state, not at module scope, so each browser session
  * gets exactly one and a server render never shares a cache between two users.
+ *
+ * It is also persisted to IndexedDB (D8): the cache is restored before the first
+ * query runs and written back after every change, so an installed app launched
+ * with no network opens on the board it last saw. `shouldPersistQuery` decides
+ * what's eligible; nothing else is written to the device.
  */
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -24,10 +37,25 @@ export function Providers({ children }: { children: React.ReactNode }) {
             // to the tab should still re-check immediately — that's the one extra
             // trigger worth having.
             refetchOnWindowFocus: true,
+            // Matched to how long a persisted cache stays usable: a board dropped
+            // from memory five minutes after its card was closed would never be
+            // written back, and the offline copy would rot while the app was open.
+            gcTime: PERSIST_MAX_AGE_MS,
           },
         },
       }),
   );
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  const [persistOptions] = useState(() => ({
+    persister: createIndexedDbPersister(),
+    maxAge: PERSIST_MAX_AGE_MS,
+    buster: PERSIST_BUSTER,
+    dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+  }));
+
+  return (
+    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
+      <ToastProvider>{children}</ToastProvider>
+    </PersistQueryClientProvider>
+  );
 }

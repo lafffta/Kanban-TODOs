@@ -207,7 +207,11 @@ export function BoardView({
         </p>
       )}
 
-      <div className="flex flex-1 gap-4 overflow-x-auto pb-4">
+      {/* The board is a horizontally-scrolling row of lanes, each scrolling
+          vertically inside itself (ticket 10). Scroll-snapping makes one lane at a
+          time the unit of movement on a phone, where a lane is most of the screen;
+          `min-h-0` is what lets the lanes scroll instead of stretching the page. */}
+      <div className="flex min-h-0 flex-1 snap-x snap-mandatory gap-4 overflow-x-auto overscroll-x-contain pb-4">
         {columns.map((column, i) => {
           // Neighbours the column lands between when nudged one step. Moving left
           // means slotting before the previous lane; moving right, after the next.

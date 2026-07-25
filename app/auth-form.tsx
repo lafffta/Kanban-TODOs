@@ -32,7 +32,7 @@ export function AuthForm({
   const [state, formAction, pending] = useActionState(action, undefined);
 
   return (
-    <main className="flex flex-1 items-center justify-center p-8">
+    <main className="flex flex-1 items-center justify-center overflow-y-auto p-8">
       <form
         action={formAction}
         className="w-full max-w-sm space-y-4 rounded-2xl border border-black/10 p-8 dark:border-white/15"

@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import type { BoardMemberProfile } from "@/db/boards";
 import type { BoardRole } from "@/db/schema";
+import { useOfflineWriteGate } from "@/app/pwa/offline-write-gate";
 import { Avatar, displayName } from "./avatar";
 import {
   changeMemberRoleAction,
@@ -106,9 +107,14 @@ export function MembersPanel({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const inviteLink = useInviteLink();
+  // Governance writes don't go through the board's `run`, so they carry the
+  // offline gate themselves — offline, every mutation is refused (D8).
+  const refuseWhileOffline = useOfflineWriteGate();
 
   function invite(event: React.FormEvent) {
     event.preventDefault();
+    const refused = refuseWhileOffline();
+    if (refused) return setError(refused);
     startTransition(async () => {
       const result = await createInviteAction({ boardId, email, role });
       if (result?.error) {
@@ -122,6 +128,8 @@ export function MembersPanel({
   }
 
   function remove(member: BoardMemberProfile) {
+    const refused = refuseWhileOffline();
+    if (refused) return setError(refused);
     if (!confirm(`Remove ${displayName(member)} from this board?`)) return;
     startTransition(async () => {
       const result = await removeMemberAction({ boardId, userId: member.id });
@@ -130,6 +138,8 @@ export function MembersPanel({
   }
 
   function setMemberRole(member: BoardMemberProfile, next: BoardRole) {
+    const refused = refuseWhileOffline();
+    if (refused) return setError(refused);
     startTransition(async () => {
       const result = await changeMemberRoleAction({
         boardId,
@@ -141,7 +151,9 @@ export function MembersPanel({
   }
 
   return (
-    <details className="rounded-xl border border-black/10 px-4 py-3 dark:border-white/15">
+    // Opened, the panel takes at most half the board's height and scrolls; a board
+    // with a long member list shouldn't push the lanes off a phone screen.
+    <details className="max-h-[50%] shrink-0 overflow-y-auto rounded-xl border border-black/10 px-4 py-3 dark:border-white/15">
       <summary className="cursor-pointer text-sm font-medium">
         Members ({members.length})
       </summary>
