@@ -1,8 +1,9 @@
 # Kanban Task Tracker
 
 A mobile-first, installable-PWA kanban board for teams. See [`DESIGN.md`](./DESIGN.md)
-for the full spec and locked design decisions, and [`.scratch/kanban-task-tracker/issues`](./.scratch/kanban-task-tracker/issues)
-for the tracer-bullet tickets.
+for the full spec and locked design decisions, and
+[GitHub Issues](https://github.com/lafffta/Kanban-TODOs/issues) for the tracer-bullet
+tickets and outstanding work.
 
 **Stack:** Next.js 15 (App Router, React 19, TypeScript) · Tailwind CSS v4 ·
 Drizzle ORM + drizzle-kit · Postgres (Docker locally, Neon **pooled** endpoint in prod).
