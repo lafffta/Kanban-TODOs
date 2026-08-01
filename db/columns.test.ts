@@ -171,3 +171,104 @@ test("acting on a missing column raises ColumnNotFoundError", async () => {
     renameColumn({ columnId: "no-such-column", name: "X", userId: owner.id }),
   ).rejects.toBeInstanceOf(ColumnNotFoundError);
 });
+
+// --- Collision-safe ordering (ticket 11) -----------------------------------
+
+test("a column position collision is retried instead of surfacing as an error", async () => {
+  const { owner, board } = await makeBoard();
+  const first = await createColumn({ boardId: board.id, name: "Todo", userId: owner.id });
+
+  // Force the exact key that is already taken, then fall back to the real
+  // generator — random jitter can't be relied on to reproduce a collision.
+  let forced = false;
+  const generate = (before: string | null, after: string | null) => {
+    if (!forced) {
+      forced = true;
+      return first.position;
+    }
+    return keyBetween(before, after);
+  };
+
+  const second = await createColumn(
+    { boardId: board.id, name: "Doing", userId: owner.id },
+    { generate },
+  );
+
+  expect(forced).toBe(true);
+  expect(second.position).not.toBe(first.position);
+  // The retry still appends: the new lane sorts after the existing one.
+  expect(second.position > first.position).toBe(true);
+
+  const lanes = await listColumns(board.id);
+  expect(lanes.map((c) => c.name)).toEqual(["Todo", "Doing"]);
+});
+
+test("column positions are unique within a board but may repeat across boards", async () => {
+  const owner = await makeUser();
+  const boardA = await createBoard({ name: "A", ownerId: owner.id });
+  const boardB = await createBoard({ name: "B", ownerId: owner.id });
+
+  const a = await createColumn({ boardId: boardA.id, name: "Todo", userId: owner.id });
+
+  // The same key on a *different* board is fine — the index is scoped per board.
+  await expect(
+    db.insert(columns).values({ boardId: boardB.id, name: "Todo", position: a.position }),
+  ).resolves.toBeDefined();
+
+  // ...but a second lane on the *same* board can never reuse the key.
+  await expect(
+    db.insert(columns).values({ boardId: boardA.id, name: "Dupe", position: a.position }),
+  ).rejects.toThrow();
+});
+
+test("concurrent column creates into the same gap all get distinct, ordered keys", async () => {
+  const { owner, board } = await makeBoard();
+
+  const created = await Promise.all(
+    Array.from({ length: 8 }, (_, i) =>
+      createColumn({ boardId: board.id, name: `Lane ${i}`, userId: owner.id }),
+    ),
+  );
+
+  const positions = created.map((c) => c.position);
+  expect(new Set(positions).size).toBe(positions.length);
+
+  // Every adjacent pair still admits a later insert — the gap isn't poisoned.
+  const ordered = [...positions].sort();
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const between = keyBetween(ordered[i], ordered[i + 1]);
+    expect(ordered[i] < between && between < ordered[i + 1]).toBe(true);
+  }
+});
+
+test("a column reorder collision narrows into the gap instead of re-rolling", async () => {
+  const { owner, board } = await makeBoard();
+  const a = await createColumn({ boardId: board.id, name: "A", userId: owner.id });
+  const b = await createColumn({ boardId: board.id, name: "B", userId: owner.id });
+  const c = await createColumn({ boardId: board.id, name: "C", userId: owner.id });
+  const d = await createColumn({ boardId: board.id, name: "D", userId: owner.id });
+
+  // Move A between B and D. C already sits strictly *inside* that gap, so forcing
+  // C's key exercises the narrowing branch (upper = collided key) rather than the
+  // re-roll branch a key equal to `before` would hit.
+  let forced = false;
+  const generate = (before: string | null, after: string | null) => {
+    if (!forced) {
+      forced = true;
+      return c.position;
+    }
+    return keyBetween(before, after);
+  };
+
+  const moved = await reorderColumn(
+    { columnId: a.id, beforeId: b.id, afterId: d.id, userId: owner.id },
+    { generate },
+  );
+
+  expect(forced).toBe(true);
+  expect(moved.position).not.toBe(c.position);
+  // Narrowed: strictly above B and strictly below the key that collided.
+  expect(b.position < moved.position && moved.position < c.position).toBe(true);
+
+  expect((await listColumns(board.id)).map((l) => l.name)).toEqual(["B", "A", "C", "D"]);
+});

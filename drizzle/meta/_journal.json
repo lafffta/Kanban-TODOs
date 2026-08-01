@@ -64,6 +64,13 @@
       "when": 1784926648120,
       "tag": "0008_orange_red_hulk",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785562323870,
+      "tag": "0009_regular_toad",
+      "breakpoints": true
     }
   ]
 }

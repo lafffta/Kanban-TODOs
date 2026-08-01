@@ -16,6 +16,7 @@ import {
   moveCard,
   updateCard,
 } from "./cards";
+import { keyBetween } from "./ordering";
 
 // Cards integration test: proves a member can create / edit / delete a card in a
 // column, that each card gets a fractional `position` within its column on create,
@@ -298,4 +299,198 @@ test("moveCard is refused for a non-member", async () => {
   await expect(
     moveCard({ cardId: card.id, columnId: column.id, beforeId: null, afterId: null, userId: outsider.id }),
   ).rejects.toMatchObject({ name: "BoardAccessError", reason: "not-a-member" });
+});
+
+// --- Collision-safe ordering (ticket 11) -----------------------------------
+
+test("a card position collision is retried instead of surfacing as an error", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const first = await createCard({
+    boardId: board.id,
+    columnId: column.id,
+    title: "A",
+    userId: owner.id,
+  });
+
+  // Force the taken key once, then defer to the real generator.
+  let forced = false;
+  const generate = (before: string | null, after: string | null) => {
+    if (!forced) {
+      forced = true;
+      return first.position;
+    }
+    return keyBetween(before, after);
+  };
+
+  const second = await createCard(
+    { boardId: board.id, columnId: column.id, title: "B", userId: owner.id },
+    { generate },
+  );
+
+  expect(forced).toBe(true);
+  expect(second.position).not.toBe(first.position);
+  expect(second.position > first.position).toBe(true);
+
+  const listed = await listCards(board.id);
+  expect(listed.map((c) => c.title)).toEqual(["A", "B"]);
+});
+
+test("a collision while moving a card is retried and lands in the requested slot", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const a = await createCard({ boardId: board.id, columnId: column.id, title: "A", userId: owner.id });
+  const b = await createCard({ boardId: board.id, columnId: column.id, title: "B", userId: owner.id });
+  const c = await createCard({ boardId: board.id, columnId: column.id, title: "C", userId: owner.id });
+
+  // Move C between A and B, but force the first attempt onto A's taken key.
+  let forced = false;
+  const generate = (before: string | null, after: string | null) => {
+    if (!forced) {
+      forced = true;
+      return a.position;
+    }
+    return keyBetween(before, after);
+  };
+
+  const moved = await moveCard(
+    {
+      cardId: c.id,
+      columnId: column.id,
+      beforeId: a.id,
+      afterId: b.id,
+      userId: owner.id,
+    },
+    { generate },
+  );
+
+  expect(forced).toBe(true);
+  expect(moved.position).not.toBe(a.position);
+  // Still strictly between its requested neighbours — the retry didn't relocate it.
+  expect(a.position < moved.position && moved.position < b.position).toBe(true);
+
+  const listed = await listCards(board.id);
+  expect(listed.map((card) => card.title)).toEqual(["A", "C", "B"]);
+});
+
+test("card positions are unique within a lane but may repeat across lanes", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const other = await createColumn({ boardId: board.id, name: "Doing", userId: owner.id });
+  const card = await createCard({
+    boardId: board.id,
+    columnId: column.id,
+    title: "A",
+    userId: owner.id,
+  });
+
+  // The same key in a different lane is fine — that's what a cross-column move relies on.
+  await expect(
+    db.insert(cards).values({
+      boardId: board.id,
+      columnId: other.id,
+      title: "Same key, other lane",
+      position: card.position,
+    }),
+  ).resolves.toBeDefined();
+
+  // A duplicate inside the same lane is refused by the database.
+  await expect(
+    db.insert(cards).values({
+      boardId: board.id,
+      columnId: column.id,
+      title: "Dupe",
+      position: card.position,
+    }),
+  ).rejects.toThrow();
+});
+
+test("concurrent card creates into one lane all get distinct, still-divisible keys", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+
+  const created = await Promise.all(
+    Array.from({ length: 8 }, (_, i) =>
+      createCard({ boardId: board.id, columnId: column.id, title: `C${i}`, userId: owner.id }),
+    ),
+  );
+
+  const positions = created.map((c) => c.position);
+  expect(new Set(positions).size).toBe(positions.length);
+
+  const ordered = [...positions].sort();
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const between = keyBetween(ordered[i], ordered[i + 1]);
+    expect(ordered[i] < between && between < ordered[i + 1]).toBe(true);
+  }
+});
+
+test("a card move collision narrows into the gap instead of re-rolling", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const mk = (title: string) =>
+    createCard({ boardId: board.id, columnId: column.id, title, userId: owner.id });
+  const a = await mk("A");
+  const b = await mk("B");
+  const c = await mk("C");
+  const d = await mk("D");
+
+  // Move A between B and D. C already occupies a key strictly inside that gap, so
+  // forcing C's key exercises the narrowing branch, not the re-roll branch that a
+  // key equal to `before` would hit.
+  let forced = false;
+  const generate = (before: string | null, after: string | null) => {
+    if (!forced) {
+      forced = true;
+      return c.position;
+    }
+    return keyBetween(before, after);
+  };
+
+  const moved = await moveCard(
+    { cardId: a.id, columnId: column.id, beforeId: b.id, afterId: d.id, userId: owner.id },
+    { generate },
+  );
+
+  expect(forced).toBe(true);
+  expect(moved.position).not.toBe(c.position);
+  expect(b.position < moved.position && moved.position < c.position).toBe(true);
+
+  const listed = await listCards(board.id);
+  expect(listed.map((card) => card.title)).toEqual(["B", "A", "C", "D"]);
+});
+
+test("a cross-column move retries a collision in the target lane", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const target = await createColumn({ boardId: board.id, name: "Doing", userId: owner.id });
+
+  const travelling = await createCard({
+    boardId: board.id,
+    columnId: column.id,
+    title: "Travelling",
+    userId: owner.id,
+  });
+  const mk = (title: string) =>
+    createCard({ boardId: board.id, columnId: target.id, title, userId: owner.id });
+  const x = await mk("X");
+  const y = await mk("Y");
+  const z = await mk("Z");
+
+  // Land it between X and Z in the *other* lane, colliding with Y on the way.
+  let forced = false;
+  const generate = (before: string | null, after: string | null) => {
+    if (!forced) {
+      forced = true;
+      return y.position;
+    }
+    return keyBetween(before, after);
+  };
+
+  const moved = await moveCard(
+    { cardId: travelling.id, columnId: target.id, beforeId: x.id, afterId: z.id, userId: owner.id },
+    { generate },
+  );
+
+  expect(forced).toBe(true);
+  expect(moved.columnId).toBe(target.id);
+  expect(moved.position).not.toBe(y.position);
+  expect(x.position < moved.position && moved.position < y.position).toBe(true);
+
+  const inTarget = (await listCards(board.id)).filter((c) => c.columnId === target.id);
+  expect(inTarget.map((c) => c.title)).toEqual(["X", "Travelling", "Y", "Z"]);
 });

@@ -35,3 +35,124 @@ export function keyBetween(
   const candidates = generateNKeysBetween(before, after, JITTER_SLOTS);
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
+
+/** How a `position` is chosen for a gap — swappable so tests can force a collision. */
+export type PositionGenerator = (before: string | null, after: string | null) => string;
+
+/**
+ * Optional seam on every position-writing db function. Production callers omit it
+ * and get jittered `keyBetween`; tests inject a generator to force the collision
+ * path deterministically, which random jitter can't be relied on to reproduce.
+ */
+export type PositionOptions = { generate?: PositionGenerator };
+
+/**
+ * How many keys we'll try before giving up. Each attempt strictly narrows the gap,
+ * so a run of collisions converges fast; the bound exists to fail loudly rather
+ * than spin if something is pathologically wrong.
+ */
+const MAX_POSITION_ATTEMPTS = 8;
+
+/**
+ * Thrown when every attempt to find a free `position` in a gap collided. Callers
+ * get a typed refusal they can surface as "try again", not a raw driver 500.
+ */
+export class PositionCollisionError extends Error {
+  constructor(
+    readonly before: string | null,
+    readonly after: string | null,
+    readonly attempts: number,
+  ) {
+    super(
+      `Could not find a free position between ${before ?? "start"} and ${
+        after ?? "end"
+      } after ${attempts} attempts.`,
+    );
+    this.name = "PositionCollisionError";
+  }
+}
+
+/** Postgres' `unique_violation`. */
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * The suffix every position index is named with (`columns_board_id_position_unique`,
+ * `cards_column_id_position_unique`). Retrying is only ever the right answer for
+ * *these* constraints: a fresh key fixes a position clash, but re-rolling a
+ * position would never fix a duplicate primary key or a duplicate invite token —
+ * those must surface, not spin.
+ */
+const POSITION_INDEX_SUFFIX = "_position_unique";
+
+/**
+ * Whether an error is Postgres refusing a duplicate *position*. Drizzle wraps
+ * driver errors, so the whole `cause` chain is searched rather than just the top
+ * error. A `23505` on any other constraint is deliberately **not** matched.
+ */
+export function isUniquePositionViolation(error: unknown): boolean {
+  for (let current = error, depth = 0; current != null && depth < 10; depth++) {
+    if (typeof current === "object" && "code" in current) {
+      const { code, constraint } = current as { code?: unknown; constraint?: unknown };
+      if (
+        code === UNIQUE_VIOLATION &&
+        typeof constraint === "string" &&
+        constraint.endsWith(POSITION_INDEX_SUFFIX)
+      ) {
+        return true;
+      }
+    }
+    if (typeof current !== "object" || !("cause" in current)) break;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
+ * Run `write` with a `position` that is free, retrying if the database refuses it
+ * as a duplicate (D3, collision-safety).
+ *
+ * Jitter alone only makes a tie *unlikely* — two clients dropping into the same
+ * gap can still pick the same candidate, and equal neighbouring keys are worse
+ * than a tie: `generateKeyBetween` cannot produce a key between two equal ones, so
+ * a collision poisons the gap for every later insert. The unique indexes on
+ * `(board_id, position)` and `(column_id, position)` turn that silent corruption
+ * into a refusal, and this helper turns the refusal into a retry.
+ *
+ * **A retry usually narrows the gap**: the key that collided becomes the new upper
+ * bound, so the next candidate is strictly smaller yet still above `before`, and
+ * cannot repeat a key we already know is taken. The row stays between the
+ * neighbours the caller named, so a retry never relocates it elsewhere on the
+ * board. (When `after` was `null` — an append — the row lands just *below* the
+ * concurrent winner rather than at the very end; still distinct and still ordered,
+ * which is what matters.)
+ *
+ * The one case that cannot narrow is a collided key at or below `before`, which a
+ * jittered generator won't produce but an injected or unjittered one can. There the
+ * bounds are kept and the key is re-rolled, so progress depends on the generator
+ * returning something new — with a deterministic generator that means the attempts
+ * are exhausted and `PositionCollisionError` is raised rather than looping.
+ */
+export async function withUniquePosition<T>(
+  before: string | null,
+  after: string | null,
+  write: (position: string) => Promise<T>,
+  { generate = keyBetween }: PositionOptions = {},
+): Promise<T> {
+  let upper = after;
+
+  for (let attempt = 1; attempt <= MAX_POSITION_ATTEMPTS; attempt++) {
+    const position = generate(before, upper);
+    try {
+      return await write(position);
+    } catch (error) {
+      if (!isUniquePositionViolation(error)) throw error;
+      // That key is taken — search below it, still inside the original gap.
+      // Only narrow while the taken key is strictly above `before`; a key at or
+      // below the lower bound would collapse the range to nothing and make the
+      // next `generate` throw. In that case keep the current bounds and re-roll.
+      if (before === null || position > before) upper = position;
+    }
+  }
+
+  throw new PositionCollisionError(before, after, MAX_POSITION_ATTEMPTS);
+}

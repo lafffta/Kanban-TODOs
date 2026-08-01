@@ -1,7 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
-import { keyBetween } from "./ordering";
+import { withUniquePosition, type PositionOptions } from "./ordering";
 import { requireBoardMember } from "./boards";
 import { columns, type Column } from "./schema";
 
@@ -50,23 +50,30 @@ async function requireColumnMember(columnId: string, userId: string): Promise<Co
  * (D1); membership is checked here. The new key is generated after the current
  * last column's position, so appends touch no existing row.
  */
-export async function createColumn(input: {
-  boardId: string;
-  name: string;
-  userId: string;
-}): Promise<Column> {
+export async function createColumn(
+  input: {
+    boardId: string;
+    name: string;
+    userId: string;
+  },
+  options: PositionOptions = {},
+): Promise<Column> {
   await requireBoardMember(input.boardId, input.userId);
   const existing = await listColumns(input.boardId);
   const last = existing.at(-1)?.position ?? null;
-  const [column] = await db
-    .insert(columns)
-    .values({
-      boardId: input.boardId,
-      name: input.name,
-      position: keyBetween(last, null),
-    })
-    .returning();
-  return column;
+
+  return withUniquePosition(
+    last,
+    null,
+    async (position) => {
+      const [column] = await db
+        .insert(columns)
+        .values({ boardId: input.boardId, name: input.name, position })
+        .returning();
+      return column;
+    },
+    options,
+  );
 }
 
 /** Rename a column (member-permitted, membership-checked). */
@@ -90,12 +97,15 @@ export async function renameColumn(input: {
  * caller can't splice in a position from another board. Generates a fractional
  * key between the neighbours' positions and rewrites the one moved row (D3).
  */
-export async function reorderColumn(input: {
-  columnId: string;
-  beforeId: string | null;
-  afterId: string | null;
-  userId: string;
-}): Promise<Column> {
+export async function reorderColumn(
+  input: {
+    columnId: string;
+    beforeId: string | null;
+    afterId: string | null;
+    userId: string;
+  },
+  options: PositionOptions = {},
+): Promise<Column> {
   const column = await requireColumnMember(input.columnId, input.userId);
 
   const neighbourPosition = async (id: string | null): Promise<string | null> => {
@@ -115,12 +125,19 @@ export async function reorderColumn(input: {
   const before = await neighbourPosition(input.beforeId);
   const after = await neighbourPosition(input.afterId);
 
-  const [updated] = await db
-    .update(columns)
-    .set({ position: keyBetween(before, after), updatedAt: new Date() })
-    .where(eq(columns.id, column.id))
-    .returning();
-  return updated;
+  return withUniquePosition(
+    before,
+    after,
+    async (position) => {
+      const [updated] = await db
+        .update(columns)
+        .set({ position, updatedAt: new Date() })
+        .where(eq(columns.id, column.id))
+        .returning();
+      return updated;
+    },
+    options,
+  );
 }
 
 /**

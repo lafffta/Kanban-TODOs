@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { PositionCollisionError } from "@/db/ordering";
 import {
   columnNameSchema,
   createColumn,
@@ -50,6 +51,29 @@ import { redirectOnBoardDenial } from "./access";
  * The *governance* actions below — invites and membership — still revalidate,
  * because the members panel they feed is server-rendered and isn't polled.
  */
+/**
+ * Shown when every attempt to find a free `position` collided (D3). Rare enough to
+ * need no design of its own, but it must not reach the user as a 500: the drop was
+ * refused cleanly and nothing was written, so re-trying really is the fix.
+ */
+const POSITION_BUSY = "That spot is busy right now — try again.";
+
+/**
+ * Turn an exhausted position retry into a form error instead of letting it escape
+ * as an unhandled 500. Wraps *outside* `redirectOnBoardDenial`, which only knows
+ * about `BoardAccessError`.
+ */
+async function refuseOnPositionCollision(
+  run: () => Promise<unknown>,
+): Promise<{ error: string } | undefined> {
+  try {
+    await run();
+  } catch (error) {
+    if (error instanceof PositionCollisionError) return { error: POSITION_BUSY };
+    throw error;
+  }
+}
+
 export type ColumnFormState = { error: string } | undefined;
 export type CardFormState = { error: string } | undefined;
 export type CommentFormState = { error: string } | undefined;
@@ -67,8 +91,10 @@ export async function createColumnAction(input: {
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid column name." };
   }
-  await redirectOnBoardDenial(() =>
-    createColumn({ boardId: input.boardId, name: parsed.data.name, userId }),
+  return refuseOnPositionCollision(() =>
+    redirectOnBoardDenial(() =>
+      createColumn({ boardId: input.boardId, name: parsed.data.name, userId }),
+    ),
   );
 }
 
@@ -96,15 +122,17 @@ export async function reorderColumnAction(input: {
   columnId: string;
   beforeId: string | null;
   afterId: string | null;
-}): Promise<void> {
+}): Promise<ColumnFormState> {
   const userId = await requireUserId();
-  await redirectOnBoardDenial(() =>
-    reorderColumn({
-      columnId: input.columnId,
-      beforeId: input.beforeId,
-      afterId: input.afterId,
-      userId,
-    }),
+  return refuseOnPositionCollision(() =>
+    redirectOnBoardDenial(() =>
+      reorderColumn({
+        columnId: input.columnId,
+        beforeId: input.beforeId,
+        afterId: input.afterId,
+        userId,
+      }),
+    ),
   );
 }
 
@@ -129,13 +157,15 @@ export async function createCardAction(input: {
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid card title." };
   }
-  await redirectOnBoardDenial(() =>
-    createCard({
-      boardId: input.boardId,
-      columnId: input.columnId,
-      title: parsed.data.title,
-      userId,
-    }),
+  return refuseOnPositionCollision(() =>
+    redirectOnBoardDenial(() =>
+      createCard({
+        boardId: input.boardId,
+        columnId: input.columnId,
+        title: parsed.data.title,
+        userId,
+      }),
+    ),
   );
 }
 
@@ -188,16 +218,18 @@ export async function moveCardAction(input: {
   columnId: string;
   beforeId: string | null;
   afterId: string | null;
-}): Promise<void> {
+}): Promise<CardFormState> {
   const userId = await requireUserId();
-  await redirectOnBoardDenial(() =>
-    moveCard({
-      cardId: input.cardId,
-      columnId: input.columnId,
-      beforeId: input.beforeId,
-      afterId: input.afterId,
-      userId,
-    }),
+  return refuseOnPositionCollision(() =>
+    redirectOnBoardDenial(() =>
+      moveCard({
+        cardId: input.cardId,
+        columnId: input.columnId,
+        beforeId: input.beforeId,
+        afterId: input.afterId,
+        userId,
+      }),
+    ),
   );
 }
 
