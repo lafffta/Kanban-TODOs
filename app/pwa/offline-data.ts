@@ -1,6 +1,8 @@
 "use client";
 
-import { forgetLastBoard } from "./last-board";
+import type { QueryClient } from "@tanstack/react-query";
+import { boardKeys } from "@/app/boards/[id]/board-data";
+import { forgetBoardIfLast, forgetLastBoard } from "./last-board";
 import { deletePersistedQueries } from "./query-persistence";
 
 /** How long to wait for the worker to confirm before giving up on it. */
@@ -18,6 +20,17 @@ export async function clearOfflineData(): Promise<void> {
   forgetLastBoard(window.localStorage);
   await deletePersistedQueries();
   await clearWorkerCaches();
+}
+
+/**
+ * Forget one board: the cached payload the device holds for it (persisted to
+ * IndexedDB by the same write) and the note an offline launch would follow back
+ * to it. The board-scoped twin of `clearOfflineData` — called when a board is
+ * deleted, since nothing else will ever correct a copy of a board that is gone.
+ */
+export function forgetBoard(queryClient: QueryClient, boardId: string): void {
+  queryClient.removeQueries({ queryKey: boardKeys.board(boardId) });
+  forgetBoardIfLast(window.localStorage, boardId);
 }
 
 /** Ask the worker to drop its caches, and wait for it to say that it has. */

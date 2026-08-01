@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { forgetBoardIfLast } from "@/app/pwa/last-board";
+import { forgetBoard } from "@/app/pwa/offline-data";
 import { useOfflineWriteGate } from "@/app/pwa/offline-write-gate";
 import { boardKeys } from "./board-data";
 import { deleteBoardAction, renameBoardAction } from "./actions";
@@ -16,6 +16,12 @@ import { deleteBoardAction, renameBoardAction } from "./actions";
  * never what is *permitted*. Neither is optimistic: the name is server-rendered
  * here and in the boards list, so the action revalidates both paths and the new
  * heading arrives with the refreshed page rather than being painted ahead of it.
+ *
+ * The polled board payload carries the name too, and a rename moves no version
+ * token — `boardVersion` is built from the board's *contents* — so nothing would
+ * ever correct the copy the device is holding, including the one persisted to
+ * IndexedDB (D8). Both writes therefore clear it here rather than leaving it to
+ * the polling loop.
  */
 export function BoardTitle({
   boardId,
@@ -49,16 +55,20 @@ export function BoardTitle({
 
   function rename(event: React.FormEvent) {
     event.preventDefault();
-    const trimmed = draft.trim();
-    if (!trimmed) return;
     const refused = refuseWhileOffline();
     if (refused) return setError(refused);
     startTransition(async () => {
-      const result = await renameBoardAction({ boardId, name: trimmed });
+      // The draft is sent as typed: the action's `boardNameSchema` is the one
+      // authority on what a name may be, so a name of nothing but spaces comes
+      // back with a reason instead of the form quietly doing nothing.
+      const result = await renameBoardAction({ boardId, name: draft });
       if (result?.error) {
         setError(result.error);
         return;
       }
+      // The refreshed page brings the new heading; this brings the payload the
+      // board's queries are still holding under the old name.
+      queryClient.invalidateQueries({ queryKey: boardKeys.board(boardId) });
       setError(null);
       setEditing(false);
     });
@@ -72,14 +82,10 @@ export function BoardTitle({
     if (!confirm(`Delete "${name}" and everything on it? This can't be undone.`)) {
       return;
     }
-    // Drop what the device holds about the board *before* sending the delete: its
-    // cached payload (persisted to IndexedDB, D8) and the note an offline launch
-    // would otherwise follow back to it. The action ends with a redirect, which
-    // unmounts this page — code after the await isn't a place to rely on. A
-    // refused delete costs only a refetch and a note that gets rewritten on the
-    // next visit.
-    queryClient.removeQueries({ queryKey: boardKeys.board(boardId) });
-    forgetBoardIfLast(window.localStorage, boardId);
+    // Forgotten *before* the delete is sent: the action ends with a redirect,
+    // which unmounts this page, so code after the await isn't a place to rely on.
+    // A refused delete costs only a refetch and a note rewritten on the next visit.
+    forgetBoard(queryClient, boardId);
     startTransition(() => deleteBoardAction({ boardId }));
   }
 
