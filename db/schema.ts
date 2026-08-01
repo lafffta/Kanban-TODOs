@@ -1,4 +1,12 @@
-import { integer, pgTable, primaryKey, serial, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  integer,
+  pgTable,
+  primaryKey,
+  serial,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
 /**
@@ -141,18 +149,28 @@ export type NewBoardMember = typeof boardMembers.$inferInsert;
  * `updatedAt` is bumped by every rename and reorder so a lane change moves the
  * board's `max(updated_at)` version and other viewers' polls notice it (D4).
  */
-export const columns = pgTable("columns", {
-  id: text("id")
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  boardId: text("board_id")
-    .notNull()
-    .references(() => boards.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  position: text("position").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const columns = pgTable(
+  "columns",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    position: text("position").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // Two lanes on one board may never share a `position` (D3). Equal keys aren't
+  // merely a display tie: `generateKeyBetween` cannot produce a key between two
+  // equal ones, so a collision would poison the gap for every later insert. The
+  // index makes the database refuse it, and `withUniquePosition` retries.
+  (table) => [
+    uniqueIndex("columns_board_id_position_unique").on(table.boardId, table.position),
+  ],
+);
 
 export type Column = typeof columns.$inferSelect;
 export type NewColumn = typeof columns.$inferInsert;
@@ -167,28 +185,37 @@ export type NewColumn = typeof columns.$inferInsert;
  * board or the parent column cascades the card; deleting a card cascades its
  * comments (the FK lands with the comments ticket).
  */
-export const cards = pgTable("cards", {
-  id: text("id")
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  boardId: text("board_id")
-    .notNull()
-    .references(() => boards.id, { onDelete: "cascade" }),
-  columnId: text("column_id")
-    .notNull()
-    .references(() => columns.id, { onDelete: "cascade" }),
-  title: text("title").notNull(),
-  description: text("description").notNull().default(""),
-  position: text("position").notNull(),
-  assigneeId: text("assignee_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  createdById: text("created_by_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const cards = pgTable(
+  "cards",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    columnId: text("column_id")
+      .notNull()
+      .references(() => columns.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    position: text("position").notNull(),
+    assigneeId: text("assignee_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdById: text("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // Two cards in one lane may never share a `position` — same reasoning as
+  // `columns` above. Scoped to the column, so the same key may recur in a
+  // different lane, which is exactly what a cross-column move relies on.
+  (table) => [
+    uniqueIndex("cards_column_id_position_unique").on(table.columnId, table.position),
+  ],
+);
 
 export type Card = typeof cards.$inferSelect;
 export type NewCard = typeof cards.$inferInsert;

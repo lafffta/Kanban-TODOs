@@ -49,7 +49,9 @@ deliberately.
   accept the logged-in user's email must match (case-insensitive). Idempotent.
 - **D3 — Concurrency = last-write-wins + fractional index.** No locking, no merge UI.
   Card/column order uses **LexoRank-style fractional-index string keys** (`position text`)
-  with jitter so two clients choosing the same slot produce *different* keys. Optimistic
+  with jitter so two clients choosing the same slot produce *different* keys — backed by a
+  unique index per lane, so a residual tie is refused by the database and retried rather
+  than stored (an equal pair cannot be ordered between afterwards). Optimistic
   drag reconciles with polling via TanStack Query: `cancelQueries` on mutate, suppress
   reconciliation while a mutation is in flight, `invalidateQueries` on settle, and gate
   stale polls with a local monotonic version.
@@ -131,8 +133,9 @@ verificationTokens (Auth.js adapter)
 boards           id, name, ownerId → users, createdAt
 board_members    boardId → boards, userId → users, role, createdAt   [PK: boardId+userId]
 columns          id, boardId → boards, name, position (TEXT, fractional index), createdAt
+                 [UNIQUE: boardId+position]
 cards            id, boardId → boards, columnId → columns, title, description,
-                 position (TEXT, fractional index),
+                 position (TEXT, fractional index),   [UNIQUE: columnId+position]
                  assigneeId → users (nullable, must be board member),
                  createdById → users (ON DELETE SET NULL),
                  createdAt, updatedAt
@@ -146,6 +149,11 @@ board_invites    id, boardId → boards, email, token (unique, crypto-random, si
 **Ordering (D3):** `columns.position` and `cards.position` are **fractional-index
 strings**. On reorder, generate a key between the new neighbours (with jitter to
 avoid identical concurrent keys) — one row touched per move, no float exhaustion.
+Uniqueness is enforced in the database, not just hoped for: unique indexes on
+`columns (board_id, position)` and `cards (column_id, position)`. Jitter alone only
+makes a tie unlikely, and equal keys are worse than a tie — `generateKeyBetween`
+cannot produce a key between two equal ones, so a collision would poison that gap
+for every later insert. A refused write is retried against a narrower gap.
 
 **Access control:** every board/column/card/comment query is scoped by verifying
 the current user's membership. Centralize in a single seam:

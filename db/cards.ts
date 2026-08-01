@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
-import { keyBetween } from "./ordering";
+import { withUniquePosition, type PositionOptions } from "./ordering";
 import { requireBoardMember } from "./boards";
 import {
   columns,
@@ -128,12 +128,15 @@ async function requireColumnInBoard(columnId: string, boardId: string): Promise<
  * so a caller can't attach a card to another board's lane. The new key is
  * generated after the current last card, so appends touch no existing row (D3).
  */
-export async function createCard(input: {
-  boardId: string;
-  columnId: string;
-  title: string;
-  userId: string;
-}): Promise<Card> {
+export async function createCard(
+  input: {
+    boardId: string;
+    columnId: string;
+    title: string;
+    userId: string;
+  },
+  options: PositionOptions = {},
+): Promise<Card> {
   await requireBoardMember(input.boardId, input.userId);
   await requireColumnInBoard(input.columnId, input.boardId);
 
@@ -144,17 +147,24 @@ export async function createCard(input: {
     .orderBy(asc(cards.position), asc(cards.id));
   const last = siblings.at(-1)?.position ?? null;
 
-  const [card] = await db
-    .insert(cards)
-    .values({
-      boardId: input.boardId,
-      columnId: input.columnId,
-      title: input.title,
-      position: keyBetween(last, null),
-      createdById: input.userId,
-    })
-    .returning();
-  return card;
+  return withUniquePosition(
+    last,
+    null,
+    async (position) => {
+      const [card] = await db
+        .insert(cards)
+        .values({
+          boardId: input.boardId,
+          columnId: input.columnId,
+          title: input.title,
+          position,
+          createdById: input.userId,
+        })
+        .returning();
+      return card;
+    },
+    options,
+  );
 }
 
 /** Edit a card's title and description (member-permitted, membership-checked). */
@@ -217,13 +227,16 @@ export async function assignCard(input: {
  * row — `columnId` + `position` in one update, last-write-wins with no locking
  * (D3). Mirrors `reorderColumn`, plus the column change.
  */
-export async function moveCard(input: {
-  cardId: string;
-  columnId: string;
-  beforeId: string | null;
-  afterId: string | null;
-  userId: string;
-}): Promise<Card> {
+export async function moveCard(
+  input: {
+    cardId: string;
+    columnId: string;
+    beforeId: string | null;
+    afterId: string | null;
+    userId: string;
+  },
+  options: PositionOptions = {},
+): Promise<Card> {
   const { card } = await requireCardMember(input.cardId, input.userId);
   await requireColumnInBoard(input.columnId, card.boardId);
 
@@ -246,16 +259,19 @@ export async function moveCard(input: {
   const before = await neighbourPosition(input.beforeId);
   const after = await neighbourPosition(input.afterId);
 
-  const [updated] = await db
-    .update(cards)
-    .set({
-      columnId: input.columnId,
-      position: keyBetween(before, after),
-      updatedAt: new Date(),
-    })
-    .where(eq(cards.id, card.id))
-    .returning();
-  return updated;
+  return withUniquePosition(
+    before,
+    after,
+    async (position) => {
+      const [updated] = await db
+        .update(cards)
+        .set({ columnId: input.columnId, position, updatedAt: new Date() })
+        .where(eq(cards.id, card.id))
+        .returning();
+      return updated;
+    },
+    options,
+  );
 }
 
 /**
