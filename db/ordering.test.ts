@@ -6,10 +6,13 @@ import {
   withUniquePosition,
 } from "./ordering";
 
-/** A stand-in for the `23505` Postgres raises when a unique index is violated. */
-function uniqueViolation(): Error & { code: string } {
+/** A stand-in for the `23505` Postgres raises when a *position* index is violated. */
+function uniqueViolation(
+  constraint = "columns_board_id_position_unique",
+): Error & { code: string; constraint: string } {
   return Object.assign(new Error("duplicate key value violates unique constraint"), {
     code: "23505",
+    constraint,
   });
 }
 
@@ -27,10 +30,25 @@ describe("isUniquePositionViolation", () => {
     expect(isUniquePositionViolation(wrapped(wrapped(uniqueViolation())))).toBe(true);
   });
 
+  it("matches the cards index too", () => {
+    expect(isUniquePositionViolation(uniqueViolation("cards_column_id_position_unique"))).toBe(
+      true,
+    );
+  });
+
   it("does not claim unrelated errors", () => {
     expect(isUniquePositionViolation(new Error("boom"))).toBe(false);
     expect(isUniquePositionViolation({ code: "23503" })).toBe(false);
     expect(isUniquePositionViolation(null)).toBe(false);
+  });
+
+  it("does not claim a 23505 on some other constraint", () => {
+    // Re-rolling a position would never fix a duplicate PK or invite token, so
+    // those must surface rather than being retried into an attempt limit.
+    expect(isUniquePositionViolation(uniqueViolation("cards_pkey"))).toBe(false);
+    expect(isUniquePositionViolation(uniqueViolation("board_invites_token_unique"))).toBe(false);
+    // A 23505 with no constraint name is not assumed to be ours either.
+    expect(isUniquePositionViolation({ code: "23505" })).toBe(false);
   });
 });
 

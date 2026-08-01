@@ -420,3 +420,77 @@ test("concurrent card creates into one lane all get distinct, still-divisible ke
     expect(ordered[i] < between && between < ordered[i + 1]).toBe(true);
   }
 });
+
+test("a card move collision narrows into the gap instead of re-rolling", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const mk = (title: string) =>
+    createCard({ boardId: board.id, columnId: column.id, title, userId: owner.id });
+  const a = await mk("A");
+  const b = await mk("B");
+  const c = await mk("C");
+  const d = await mk("D");
+
+  // Move A between B and D. C already occupies a key strictly inside that gap, so
+  // forcing C's key exercises the narrowing branch, not the re-roll branch that a
+  // key equal to `before` would hit.
+  let forced = false;
+  const generate = (before: string | null, after: string | null) => {
+    if (!forced) {
+      forced = true;
+      return c.position;
+    }
+    return keyBetween(before, after);
+  };
+
+  const moved = await moveCard(
+    { cardId: a.id, columnId: column.id, beforeId: b.id, afterId: d.id, userId: owner.id },
+    { generate },
+  );
+
+  expect(forced).toBe(true);
+  expect(moved.position).not.toBe(c.position);
+  expect(b.position < moved.position && moved.position < c.position).toBe(true);
+
+  const listed = await listCards(board.id);
+  expect(listed.map((card) => card.title)).toEqual(["B", "A", "C", "D"]);
+});
+
+test("a cross-column move retries a collision in the target lane", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const target = await createColumn({ boardId: board.id, name: "Doing", userId: owner.id });
+
+  const travelling = await createCard({
+    boardId: board.id,
+    columnId: column.id,
+    title: "Travelling",
+    userId: owner.id,
+  });
+  const mk = (title: string) =>
+    createCard({ boardId: board.id, columnId: target.id, title, userId: owner.id });
+  const x = await mk("X");
+  const y = await mk("Y");
+  const z = await mk("Z");
+
+  // Land it between X and Z in the *other* lane, colliding with Y on the way.
+  let forced = false;
+  const generate = (before: string | null, after: string | null) => {
+    if (!forced) {
+      forced = true;
+      return y.position;
+    }
+    return keyBetween(before, after);
+  };
+
+  const moved = await moveCard(
+    { cardId: travelling.id, columnId: target.id, beforeId: x.id, afterId: z.id, userId: owner.id },
+    { generate },
+  );
+
+  expect(forced).toBe(true);
+  expect(moved.columnId).toBe(target.id);
+  expect(moved.position).not.toBe(y.position);
+  expect(x.position < moved.position && moved.position < y.position).toBe(true);
+
+  const inTarget = (await listCards(board.id)).filter((c) => c.columnId === target.id);
+  expect(inTarget.map((c) => c.title)).toEqual(["X", "Travelling", "Y", "Z"]);
+});

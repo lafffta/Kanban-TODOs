@@ -76,13 +76,30 @@ export class PositionCollisionError extends Error {
 const UNIQUE_VIOLATION = "23505";
 
 /**
- * Whether an error is Postgres refusing a duplicate key. Drizzle wraps driver
- * errors, so the whole `cause` chain is searched rather than just the top error.
+ * The suffix every position index is named with (`columns_board_id_position_unique`,
+ * `cards_column_id_position_unique`). Retrying is only ever the right answer for
+ * *these* constraints: a fresh key fixes a position clash, but re-rolling a
+ * position would never fix a duplicate primary key or a duplicate invite token —
+ * those must surface, not spin.
+ */
+const POSITION_INDEX_SUFFIX = "_position_unique";
+
+/**
+ * Whether an error is Postgres refusing a duplicate *position*. Drizzle wraps
+ * driver errors, so the whole `cause` chain is searched rather than just the top
+ * error. A `23505` on any other constraint is deliberately **not** matched.
  */
 export function isUniquePositionViolation(error: unknown): boolean {
   for (let current = error, depth = 0; current != null && depth < 10; depth++) {
     if (typeof current === "object" && "code" in current) {
-      if ((current as { code?: unknown }).code === UNIQUE_VIOLATION) return true;
+      const { code, constraint } = current as { code?: unknown; constraint?: unknown };
+      if (
+        code === UNIQUE_VIOLATION &&
+        typeof constraint === "string" &&
+        constraint.endsWith(POSITION_INDEX_SUFFIX)
+      ) {
+        return true;
+      }
     }
     if (typeof current !== "object" || !("cause" in current)) break;
     current = (current as { cause?: unknown }).cause;
@@ -101,10 +118,19 @@ export function isUniquePositionViolation(error: unknown): boolean {
  * `(board_id, position)` and `(column_id, position)` turn that silent corruption
  * into a refusal, and this helper turns the refusal into a retry.
  *
- * **Each retry narrows the gap**: the key that collided becomes the new upper
- * bound, so the next candidate is strictly smaller yet still above `before` — it
- * lands in the same slot the user asked for, and it cannot repeat a key we already
- * know is taken. That guarantees progress instead of re-rolling the same dice.
+ * **A retry usually narrows the gap**: the key that collided becomes the new upper
+ * bound, so the next candidate is strictly smaller yet still above `before`, and
+ * cannot repeat a key we already know is taken. The row stays between the
+ * neighbours the caller named, so a retry never relocates it elsewhere on the
+ * board. (When `after` was `null` — an append — the row lands just *below* the
+ * concurrent winner rather than at the very end; still distinct and still ordered,
+ * which is what matters.)
+ *
+ * The one case that cannot narrow is a collided key at or below `before`, which a
+ * jittered generator won't produce but an injected or unjittered one can. There the
+ * bounds are kept and the key is re-rolled, so progress depends on the generator
+ * returning something new — with a deterministic generator that means the attempts
+ * are exhausted and `PositionCollisionError` is raised rather than looping.
  */
 export async function withUniquePosition<T>(
   before: string | null,

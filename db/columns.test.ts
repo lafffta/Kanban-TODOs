@@ -240,3 +240,35 @@ test("concurrent column creates into the same gap all get distinct, ordered keys
     expect(ordered[i] < between && between < ordered[i + 1]).toBe(true);
   }
 });
+
+test("a column reorder collision narrows into the gap instead of re-rolling", async () => {
+  const { owner, board } = await makeBoard();
+  const a = await createColumn({ boardId: board.id, name: "A", userId: owner.id });
+  const b = await createColumn({ boardId: board.id, name: "B", userId: owner.id });
+  const c = await createColumn({ boardId: board.id, name: "C", userId: owner.id });
+  const d = await createColumn({ boardId: board.id, name: "D", userId: owner.id });
+
+  // Move A between B and D. C already sits strictly *inside* that gap, so forcing
+  // C's key exercises the narrowing branch (upper = collided key) rather than the
+  // re-roll branch a key equal to `before` would hit.
+  let forced = false;
+  const generate = (before: string | null, after: string | null) => {
+    if (!forced) {
+      forced = true;
+      return c.position;
+    }
+    return keyBetween(before, after);
+  };
+
+  const moved = await reorderColumn(
+    { columnId: a.id, beforeId: b.id, afterId: d.id, userId: owner.id },
+    { generate },
+  );
+
+  expect(forced).toBe(true);
+  expect(moved.position).not.toBe(c.position);
+  // Narrowed: strictly above B and strictly below the key that collided.
+  expect(b.position < moved.position && moved.position < c.position).toBe(true);
+
+  expect((await listColumns(board.id)).map((l) => l.name)).toEqual(["B", "A", "C", "D"]);
+});
