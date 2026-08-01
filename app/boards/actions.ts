@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { createBoard, createBoardSchema } from "@/db/boards";
+import { boardNameSchema, createBoard } from "@/db/boards";
 
 export type CreateBoardState = { error: string } | undefined;
 
@@ -20,7 +20,7 @@ export async function createBoardAction(
   const session = await auth();
   if (!session?.user?.id) redirect("/sign-in");
 
-  const parsed = createBoardSchema.safeParse({ name: formData.get("name") });
+  const parsed = boardNameSchema.safeParse({ name: formData.get("name") });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid board name." };
   }

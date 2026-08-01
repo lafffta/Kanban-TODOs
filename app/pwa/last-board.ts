@@ -51,6 +51,15 @@ export function readLastBoard(storage: StorageLike): LastBoard | null {
   }
 }
 
+/**
+ * Drop the note if it points at this board — for when the board is deleted. Left
+ * in place, an offline launch would follow it to a board that no longer exists and
+ * open the copy the device happens to be holding.
+ */
+export function forgetBoardIfLast(storage: StorageLike, boardId: string): void {
+  if (readLastBoard(storage)?.id === boardId) forgetLastBoard(storage);
+}
+
 /** Drop the note — on sign-out, so the next person doesn't land on it. */
 export function forgetLastBoard(storage: StorageLike): void {
   try {

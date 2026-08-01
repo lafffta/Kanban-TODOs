@@ -1,19 +1,26 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { closeDb, db } from "./index";
 import { registerUser } from "./auth";
-import { boardMembers } from "./schema";
+import { boardInvites, boardMembers } from "./schema";
 import {
   BoardAccessError,
+  boardNameSchema,
   changeMemberRole,
   createBoard,
+  deleteBoard,
+  getBoard,
   listBoardMembers,
   listBoardsForUser,
   removeMember,
+  renameBoard,
   requireBoardMember,
 } from "./boards";
-import { createColumn } from "./columns";
+import { createColumn, listColumns } from "./columns";
 import { assignCard, createCard, listCards } from "./cards";
+import { addComment, listComments } from "./comments";
+import { createInvite } from "./invites";
 
 // Boards + membership integration test: proves creating a board makes the creator
 // an `owner` member, that board listing is scoped to membership (two users each
@@ -36,6 +43,15 @@ function uniqueEmail() {
 
 async function makeUser() {
   return registerUser({ email: uniqueEmail(), password: "correct horse battery" });
+}
+
+/**
+ * Invites still on a board, read straight from the table. The public read
+ * (`listPendingInvites`) is owner-gated, and the deletion cascade under test takes
+ * the owner's membership with it — so proving the rows are gone has to bypass it.
+ */
+async function listInviteRows(boardId: string) {
+  return db.select().from(boardInvites).where(eq(boardInvites.boardId, boardId));
 }
 
 test("creating a board makes the creator an owner member", async () => {
@@ -206,6 +222,99 @@ test("the board's creator can be neither removed nor demoted", async () => {
     }),
   ).rejects.toMatchObject(refused);
   expect((await requireBoardMember(board.id, owner.id, "owner")).role).toBe("owner");
+});
+
+test("an owner renames a board; a member and a non-member cannot", async () => {
+  const owner = await makeUser();
+  const member = await makeUser();
+  const outsider = await makeUser();
+  const board = await createBoard({ name: "Roadmap", ownerId: owner.id });
+  await db
+    .insert(boardMembers)
+    .values({ boardId: board.id, userId: member.id, role: "member" });
+
+  const renamed = await renameBoard({
+    boardId: board.id,
+    name: "Q3 roadmap",
+    actorId: owner.id,
+  });
+  expect(renamed.name).toBe("Q3 roadmap");
+  expect((await getBoard(board.id))?.name).toBe("Q3 roadmap");
+
+  await expect(
+    renameBoard({ boardId: board.id, name: "Mine now", actorId: member.id }),
+  ).rejects.toMatchObject({ name: "BoardAccessError", reason: "insufficient-role" });
+  await expect(
+    renameBoard({ boardId: board.id, name: "Mine now", actorId: outsider.id }),
+  ).rejects.toMatchObject({ name: "BoardAccessError", reason: "not-a-member" });
+
+  expect((await getBoard(board.id))?.name).toBe("Q3 roadmap");
+});
+
+test("a board name is trimmed, non-empty and at most 100 characters", () => {
+  expect(boardNameSchema.safeParse({ name: "  Roadmap  " }).data?.name).toBe("Roadmap");
+  expect(boardNameSchema.safeParse({ name: "   " }).success).toBe(false);
+  expect(boardNameSchema.safeParse({ name: "n".repeat(100) }).success).toBe(true);
+  expect(boardNameSchema.safeParse({ name: "n".repeat(101) }).success).toBe(false);
+});
+
+test("an owner deletes a board and everything it owns goes with it", async () => {
+  const owner = await makeUser();
+  const member = await makeUser();
+  const board = await createBoard({ name: "Doomed", ownerId: owner.id });
+  await db
+    .insert(boardMembers)
+    .values({ boardId: board.id, userId: member.id, role: "member" });
+
+  const column = await createColumn({
+    boardId: board.id,
+    name: "To Do",
+    userId: owner.id,
+  });
+  const card = await createCard({
+    boardId: board.id,
+    columnId: column.id,
+    title: "Work",
+    userId: owner.id,
+  });
+  await addComment({ cardId: card.id, body: "On it", userId: member.id });
+  await createInvite({
+    boardId: board.id,
+    email: uniqueEmail(),
+    role: "member",
+    userId: owner.id,
+  });
+
+  await deleteBoard({ boardId: board.id, actorId: owner.id });
+
+  expect(await getBoard(board.id)).toBeNull();
+  expect(await listColumns(board.id)).toHaveLength(0);
+  expect(await listCards(board.id)).toHaveLength(0);
+  expect(await listComments(card.id)).toHaveLength(0);
+  expect(await listBoardMembers(board.id)).toHaveLength(0);
+  expect(await listInviteRows(board.id)).toHaveLength(0);
+  // It is gone from both members' boards lists, not just the owner's.
+  expect(await listBoardsForUser(owner.id)).toHaveLength(0);
+  expect(await listBoardsForUser(member.id)).toHaveLength(0);
+});
+
+test("a member cannot delete a board", async () => {
+  const owner = await makeUser();
+  const member = await makeUser();
+  const outsider = await makeUser();
+  const board = await createBoard({ name: "Team", ownerId: owner.id });
+  await db
+    .insert(boardMembers)
+    .values({ boardId: board.id, userId: member.id, role: "member" });
+
+  await expect(
+    deleteBoard({ boardId: board.id, actorId: member.id }),
+  ).rejects.toMatchObject({ name: "BoardAccessError", reason: "insufficient-role" });
+  await expect(
+    deleteBoard({ boardId: board.id, actorId: outsider.id }),
+  ).rejects.toMatchObject({ name: "BoardAccessError", reason: "not-a-member" });
+
+  expect(await getBoard(board.id)).not.toBeNull();
 });
 
 test("managing someone who isn't a member is refused", async () => {
