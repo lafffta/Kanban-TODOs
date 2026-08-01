@@ -144,9 +144,13 @@ host automatically. (It's only required for a *local* production run; see
 
 ### Verifying a deploy
 
-- `GET /api/health` → `200 {"db":"up"}` confirms the app connected to Postgres.
+- `GET /api/health` → `200 {"status":"ok","db":"up"}` confirms the app connected
+  to Postgres.
   Note it only runs `SELECT 1`, so it proves **connectivity**, not that the schema
   is migrated — a real sign-up/board write is the true schema check.
+  A failure answers `503 {"status":"error","db":"down"}` and nothing else — the
+  endpoint is public, so the driver's message (host, port, role, TLS) stays out of
+  the body. Read the cause in the runtime logs: `/api/health: database probe failed`.
 - Watch runtime logs for the **new deployment** and confirm routes log at `info`,
   not `error` (e.g. `/boards` should be `307 [info]`, not `307 [error]`).
 
@@ -157,4 +161,4 @@ host automatically. (It's only required for a *local* production run; see
 2. Update `DATABASE_URL` in Vercel (Production) with the new pooled string, then
    **redeploy**.
 3. Update your local `.env` if you run migrations/seed against prod.
-4. Verify `GET /api/health` → `200 {"db":"up"}`.
+4. Verify `GET /api/health` → `200 {"status":"ok","db":"up"}`.
