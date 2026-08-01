@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { PositionCollisionError } from "@/db/ordering";
 import {
   columnNameSchema,
@@ -27,9 +28,12 @@ import {
 } from "@/db/comments";
 import {
   MembershipError,
+  boardNameSchema,
   boardRoleSchema,
   changeMemberRole,
+  deleteBoard,
   removeMember,
+  renameBoard,
 } from "@/db/boards";
 import type { BoardRole } from "@/db/schema";
 import {
@@ -48,8 +52,9 @@ import { redirectOnBoardDenial } from "./access";
  * (D3/D4). Pushing a whole RSC payload back on every keystroke-sized edit would
  * be a second, slower copy of the same news.
  *
- * The *governance* actions below — invites and membership — still revalidate,
- * because the members panel they feed is server-rendered and isn't polled.
+ * The *governance* actions below — invites, membership, and the board's own name
+ * and existence — still revalidate, because the members panel and the heading they
+ * feed are server-rendered and aren't polled.
  */
 /**
  * Shown when every attempt to find a free `position` collided (D3). Rare enough to
@@ -74,6 +79,7 @@ async function refuseOnPositionCollision(
   }
 }
 
+export type BoardFormState = { error: string } | undefined;
 export type ColumnFormState = { error: string } | undefined;
 export type CardFormState = { error: string } | undefined;
 export type CommentFormState = { error: string } | undefined;
@@ -377,4 +383,41 @@ export async function changeMemberRoleAction(input: {
     throw error;
   }
   revalidatePath(`/boards/${input.boardId}`);
+}
+
+/**
+ * Rename the board (owner-only, enforced in the db layer — a member who somehow
+ * reaches this is redirected away like any other denied board action). The name is
+ * server-rendered in the board header and in the boards list, so both paths are
+ * revalidated; the client's polled payload carries no name of its own.
+ */
+export async function renameBoardAction(input: {
+  boardId: string;
+  name: string;
+}): Promise<BoardFormState> {
+  const userId = await requireUserId();
+  const parsed = boardNameSchema.safeParse({ name: input.name });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid board name." };
+  }
+  await redirectOnBoardDenial(() =>
+    renameBoard({ boardId: input.boardId, name: parsed.data.name, actorId: userId }),
+  );
+  revalidatePath(`/boards/${input.boardId}`);
+  revalidatePath("/boards");
+}
+
+/**
+ * Delete the board and everything on it (owner-only; the cascade is the schema's,
+ * D5). The confirm dialog lives in the UI. There is nothing left to render at
+ * `/boards/:id` afterwards, so the owner is sent back to their boards list — with
+ * that list revalidated first, or it would still show the board that just went.
+ */
+export async function deleteBoardAction(input: { boardId: string }): Promise<void> {
+  const userId = await requireUserId();
+  await redirectOnBoardDenial(() =>
+    deleteBoard({ boardId: input.boardId, actorId: userId }),
+  );
+  revalidatePath("/boards");
+  redirect("/boards");
 }

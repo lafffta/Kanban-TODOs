@@ -9,6 +9,7 @@ import { OfflineCopyWarmer } from "@/app/pwa/service-worker";
 import { redirectOnBoardDenial } from "./access";
 import { serializeBoard } from "./board-data";
 import { BoardProvider } from "./board-context";
+import { BoardTitle } from "./board-title";
 import { BoardView } from "./board-view";
 import { MembersPanel } from "./members-panel";
 
@@ -16,7 +17,9 @@ import { MembersPanel } from "./members-panel";
 // in `position` order. Gated by `requireBoardMember` — a non-member is bounced back
 // to their boards list. Members create/rename/reorder/delete columns and
 // create/edit/assign/delete cards here; the "my cards" filter (?mine=1) narrows the
-// board to the current user's assigned cards (ticket 05).
+// board to the current user's assigned cards (ticket 05). The heading carries the
+// owner-only lifecycle controls — rename the board, or delete it and everything on
+// it (ticket 12) — which is why the name is rendered through `BoardTitle`.
 //
 // The board is read once here so the first paint needs no round trip, then handed
 // to `BoardProvider`, which polls it from `/api/boards/:id` from that point on
@@ -54,7 +57,7 @@ export default async function BoardPage({
           <Link href="/boards" className="text-sm opacity-60 hover:opacity-100">
             ← Boards
           </Link>
-          <h1 className="mt-1 text-2xl font-semibold">{snapshot.board.name}</h1>
+          <BoardTitle boardId={id} name={snapshot.board.name} isOwner={isOwner} />
         </div>
         <Link
           href={onlyMine ? `/boards/${id}` : `/boards/${id}?mine=1`}

@@ -1,5 +1,10 @@
 import { expect, test } from "vitest";
-import { forgetLastBoard, readLastBoard, rememberLastBoard } from "./last-board";
+import {
+  forgetBoardIfLast,
+  forgetLastBoard,
+  readLastBoard,
+  rememberLastBoard,
+} from "./last-board";
 
 // "Launched offline, the app opens straight to the last-seen board" (D8) rests on
 // this note-to-self. It is read at launch to decide where to send someone, so a
@@ -47,6 +52,17 @@ test("forgetting leaves no board to open", () => {
   const storage = fakeStorage();
   rememberLastBoard(storage, { id: "b1", name: "Roadmap" });
   forgetLastBoard(storage);
+  expect(readLastBoard(storage)).toBeNull();
+});
+
+test("a deleted board is forgotten; another board's deletion leaves the note", () => {
+  const storage = fakeStorage();
+  rememberLastBoard(storage, { id: "b1", name: "Roadmap" });
+
+  forgetBoardIfLast(storage, "b2");
+  expect(readLastBoard(storage)).toEqual({ id: "b1", name: "Roadmap" });
+
+  forgetBoardIfLast(storage, "b1");
   expect(readLastBoard(storage)).toBeNull();
 });
 

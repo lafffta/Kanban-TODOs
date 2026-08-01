@@ -60,8 +60,11 @@ export class BoardAccessError extends Error {
   }
 }
 
-/** Zod shape for creating a board — the boundary check for the create mutation. */
-export const createBoardSchema = z.object({
+/**
+ * Zod shape for a board name — the boundary check shared by create and rename, so
+ * a board can't be renamed to something it could never have been created as.
+ */
+export const boardNameSchema = z.object({
   name: z.string().trim().min(1, "Board name is required.").max(100),
 });
 
@@ -151,6 +154,41 @@ export async function requireBoardMember(
     throw new BoardAccessError("insufficient-role", boardId, userId);
   }
   return membership;
+}
+
+/**
+ * Rename a board (owner-only, D1 — a member does all *content* work but no
+ * governance). The name is validated at the action boundary with
+ * `boardNameSchema`; this layer's job is the owner gate and the write.
+ */
+export async function renameBoard(input: {
+  boardId: string;
+  name: string;
+  actorId: string;
+}): Promise<Board> {
+  await requireBoardMember(input.boardId, input.actorId, "owner");
+
+  const [updated] = await db
+    .update(boards)
+    .set({ name: input.name })
+    .where(eq(boards.id, input.boardId))
+    .returning();
+  return updated;
+}
+
+/**
+ * Delete a board permanently (owner-only, D1). Everything the board owns —
+ * memberships, invites, columns, cards, comments — goes with it through the
+ * schema's `ON DELETE CASCADE` chain (D5), so this is one statement rather than a
+ * hand-rolled teardown that could drift from the schema. The confirmation the
+ * deletion needs is the UI's job.
+ */
+export async function deleteBoard(input: {
+  boardId: string;
+  actorId: string;
+}): Promise<void> {
+  await requireBoardMember(input.boardId, input.actorId, "owner");
+  await db.delete(boards).where(eq(boards.id, input.boardId));
 }
 
 /** Why a membership change was refused — distinct from *who* may make it. */
