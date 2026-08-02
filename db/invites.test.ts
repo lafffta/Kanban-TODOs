@@ -124,6 +124,35 @@ test("accepting an invite makes the invitee a member with the invited role", asy
   expect(spent.acceptedAt).not.toBeNull();
 });
 
+test("an account signed up in mixed case still matches its invite", async () => {
+  const { owner, board } = await makeBoard();
+  // The invitee typed their address with capitals at sign-up; the owner typed it
+  // in lowercase. Both sides canonicalize to the same identity (ticket 14).
+  const typedAtSignUp = uniqueEmail().toUpperCase();
+  const invitee = await makeUser(typedAtSignUp);
+  const invite = await createInvite({
+    boardId: board.id,
+    email: typedAtSignUp.toLowerCase(),
+    role: "member",
+    userId: owner.id,
+  });
+
+  expect((await reviewInvite(invite.token, invitee.id)).state).toBe("acceptable");
+  const result = await acceptInvite({ token: invite.token, userId: invitee.id });
+  expect(result.alreadyMember).toBe(false);
+  expect((await requireBoardMember(board.id, invitee.id)).role).toBe("member");
+
+  // And the owner can't re-invite them under yet another casing.
+  await expect(
+    createInvite({
+      boardId: board.id,
+      email: ` ${typedAtSignUp} `,
+      role: "member",
+      userId: owner.id,
+    }),
+  ).rejects.toMatchObject({ name: "InviteError", reason: "already-a-member" });
+});
+
 test("an invite can mint a co-owner", async () => {
   const { owner, board } = await makeBoard();
   const invitee = await makeUser();

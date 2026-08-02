@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { closeDb, db } from "./index";
+import { users } from "./schema";
 import {
   authorizeCredentials,
   createAccount,
+  isDuplicateEmailViolation,
   registerUser,
   verifyCredentials,
 } from "./auth";
@@ -68,4 +70,76 @@ test("createAccount validates input and rejects duplicate emails", async () => {
   // Duplicate email → friendly failure, not a raw DB error.
   const dup = await createAccount({ email, password: "longenough1" });
   expect(dup.ok).toBe(false);
+});
+
+// --- Canonical email identity (ticket 14) ---
+// One address = one account, however it was typed. Registration canonicalizes,
+// sign-in canonicalizes the same way, and Postgres holds the invariant.
+
+test("registration stores the canonical address, trimmed and lowercased", async () => {
+  const canonical = uniqueEmail();
+  const typed = `  ${canonical.toUpperCase()}  `;
+
+  const user = await registerUser({ email: typed, password: "correct horse battery" });
+  expect(user.email).toBe(canonical);
+});
+
+test("sign-in matches the account whatever case or padding was typed", async () => {
+  const canonical = uniqueEmail();
+  const user = await registerUser({
+    email: canonical,
+    password: "correct horse battery",
+  });
+
+  for (const typed of [
+    canonical.toUpperCase(),
+    `  ${canonical}  `,
+    ` ${canonical.toUpperCase()} `,
+  ]) {
+    expect((await verifyCredentials(typed, "correct horse battery"))?.id).toBe(user.id);
+    expect(
+      (await authorizeCredentials({ email: typed, password: "correct horse battery" }))
+        ?.id,
+    ).toBe(user.id);
+  }
+
+  // Canonicalizing must not weaken the password check.
+  expect(await verifyCredentials(canonical.toUpperCase(), "wrong")).toBeNull();
+});
+
+test("a second account cannot claim the same address in a different case", async () => {
+  const canonical = uniqueEmail();
+  const first = await createAccount({ email: canonical, password: "longenough1" });
+  expect(first.ok).toBe(true);
+
+  const dup = await createAccount({
+    email: ` ${canonical.toUpperCase()} `,
+    password: "longenough1",
+  });
+  expect(dup.ok).toBe(false);
+  // Generic: the refusal says the address is taken, never whose it is or how it
+  // was originally typed.
+  if (!dup.ok) {
+    expect(dup.error).toBe("That email is already registered.");
+    expect(dup.error).not.toContain(canonical);
+  }
+});
+
+test("Postgres refuses a colliding account even when the app is bypassed", async () => {
+  const canonical = uniqueEmail();
+  await db.insert(users).values({ email: canonical });
+
+  // A writer that skips `registerUser` — a future OAuth adapter, a seed script —
+  // still cannot mint a second identity for the same address. Both halves of the
+  // canonical form are enforced, not just the case fold.
+  for (const bypass of [canonical.toUpperCase(), `  ${canonical}  `]) {
+    const collision = await db
+      .insert(users)
+      .values({ email: bypass })
+      .then(
+        () => null,
+        (err: unknown) => err,
+      );
+    expect(isDuplicateEmailViolation(collision)).toBe(true);
+  }
 });

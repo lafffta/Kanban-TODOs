@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { and, asc, eq, gt, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gt, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
 import { boardRoleSchema, membershipOf, requireBoardMember } from "./boards";
+import { canonicalEmail, canonicalEmailSql } from "./email";
 import {
   boardInvites,
   boards,
@@ -11,15 +12,6 @@ import {
   type BoardInvite,
   type BoardRole,
 } from "./schema";
-
-/**
- * A user's email folded to lowercase *in SQL*. Accounts store the address as the
- * user typed it, while invites store it normalized, so every comparison between
- * the two has to fold the stored side (D2 — the match is case-insensitive).
- */
-function lower(column: typeof users.email): SQL<string> {
-  return sql<string>`lower(${column})`;
-}
 
 /** How long a minted invite stays acceptable (D2/D6). */
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -36,14 +28,6 @@ export const createInviteSchema = z.object({
  */
 function mintToken(): string {
   return randomBytes(32).toString("base64url");
-}
-
-/**
- * Emails are stored and compared lowercased, so an invite to `Ada@Example.com`
- * is accepted by an account registered as `ada@example.com` (D2).
- */
-function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
 }
 
 /**
@@ -64,13 +48,16 @@ export async function createInvite(input: {
 }): Promise<BoardInvite> {
   await requireBoardMember(input.boardId, input.userId, "owner");
 
-  const email = normalizeEmail(input.email);
+  const email = canonicalEmail(input.email);
   const [existing] = await db
     .select({ userId: boardMembers.userId })
     .from(boardMembers)
     .innerJoin(users, eq(users.id, boardMembers.userId))
     .where(
-      and(eq(boardMembers.boardId, input.boardId), eq(lower(users.email), email)),
+      and(
+        eq(boardMembers.boardId, input.boardId),
+        eq(canonicalEmailSql(users.email), email),
+      ),
     )
     .limit(1);
   if (existing) throw new InviteError("already-a-member");
@@ -192,7 +179,7 @@ export async function reviewInvite(token: string, userId: string): Promise<Invit
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
-  if (!user || normalizeEmail(user.email) !== invite.email) {
+  if (!user || canonicalEmail(user.email) !== invite.email) {
     return { state: "rejected", reason: "email-mismatch", invite };
   }
 

@@ -71,6 +71,13 @@
       "when": 1785562323870,
       "tag": "0009_regular_toad",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785699567320,
+      "tag": "0010_normalized_email_identity",
+      "breakpoints": true
     }
   ]
 }
