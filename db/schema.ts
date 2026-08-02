@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   integer,
   pgTable,
@@ -28,18 +29,30 @@ export type NewGreeting = typeof greetings.$inferInsert;
  * `emailVerified`, `image`) plus `passwordHash` for the Credentials provider and
  * `name` from DESIGN.md. The adapter tables (accounts, sessions,
  * verificationTokens) are reserved for future OAuth and land in a later slice.
+ *
+ * `email` is the account's identity, so it is unique on its *canonical* form
+ * (`lower(email)`, see `db/email.ts`) rather than on the typed text: a plain
+ * unique column would happily let `ada@x.com` and `Ada@x.com` become two
+ * accounts for one person. Writes canonicalize before they get here; the index
+ * is what makes that hold for writers that don't.
  */
-export const users = pgTable("users", {
-  id: text("id")
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  name: text("name"),
-  email: text("email").notNull().unique(),
-  emailVerified: timestamp("email_verified", { withTimezone: true }),
-  image: text("image"),
-  passwordHash: text("password_hash"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const users = pgTable(
+  "users",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    name: text("name"),
+    email: text("email").notNull(),
+    emailVerified: timestamp("email_verified", { withTimezone: true }),
+    image: text("image"),
+    passwordHash: text("password_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("users_email_canonical_unique").on(sql`lower(${table.email})`),
+  ],
+);
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

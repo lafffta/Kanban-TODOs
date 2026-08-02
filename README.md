@@ -141,6 +141,12 @@ host automatically. (It's only required for a *local* production run; see
   ```
 - **After changing an env var:** redeploy (Deployments → latest → ⋯ → Redeploy),
   since running functions won't pick up the change otherwise.
+- **If `0010_normalized_email_identity` refuses to apply:** two accounts in the
+  target database already share one address in different capitalizations, and the
+  migration will not pick a winner — it names them and stops, having changed
+  nothing. Decide by hand which account keeps the address (rename or remove the
+  other, moving any boards or memberships you want to keep), then re-run
+  `npm run db:migrate`.
 
 ### Verifying a deploy
 
