@@ -1,5 +1,5 @@
 {
-  "id": "2626679f-16c9-4948-8376-2aca045a6258",
+  "id": "18a17a24-a488-40db-98bc-3d5e63dc083e",
   "prevId": "2731261a-0452-4dcd-96a1-50d73667e4d5",
   "version": "7",
   "dialect": "postgresql",
@@ -772,7 +772,7 @@
           "name": "users_email_canonical_unique",
           "columns": [
             {
-              "expression": "lower(\"email\")",
+              "expression": "lower(btrim(\"email\"))",
               "asc": true,
               "isExpression": true,
               "nulls": "last"

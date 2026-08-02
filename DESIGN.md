@@ -161,9 +161,11 @@ exactly one account however it was typed. `users.email` and `board_invites.email
 store the **canonical** form — trimmed and lowercased — produced by the single seam
 in `db/email.ts`, applied at every boundary that turns typed text into an identity
 (sign-up, sign-in, minting an invite, matching one). Uniqueness is enforced on
-`lower(email)` rather than on the column, so a writer that skips those seams (a
-future OAuth adapter row, a script) still can't mint a second identity for one
-address. Duplicate-registration and failed-credential messages stay generic — they
+`lower(btrim(email))` rather than on the column — the same expression that seam
+computes — so a writer that skips those seams (a future OAuth adapter row, a
+script) still can't mint a second identity for one address. Provider-specific
+folding (gmail's dots, `+tag` suffixes) is deliberately not done: those rules vary
+by provider, and guessing wrong merges two people into one account. Duplicate-registration and failed-credential messages stay generic — they
 say the address is taken or the credentials are wrong, never whose account it is.
 
 **Access control:** every board/column/card/comment query is scoped by verifying

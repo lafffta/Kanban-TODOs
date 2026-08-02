@@ -31,10 +31,12 @@ export type NewGreeting = typeof greetings.$inferInsert;
  * verificationTokens) are reserved for future OAuth and land in a later slice.
  *
  * `email` is the account's identity, so it is unique on its *canonical* form
- * (`lower(email)`, see `db/email.ts`) rather than on the typed text: a plain
- * unique column would happily let `ada@x.com` and `Ada@x.com` become two
- * accounts for one person. Writes canonicalize before they get here; the index
- * is what makes that hold for writers that don't.
+ * rather than on the typed text: a plain unique column would happily let
+ * `ada@x.com`, `Ada@x.com` and ` ada@x.com ` become three accounts for one
+ * person. Writes canonicalize before they get here; the index is what makes that
+ * hold for writers that don't. Its expression must stay identical to
+ * `canonicalEmail` / `canonicalEmailSql` in `db/email.ts` — if the two drift, the
+ * constraint stops enforcing the identity the app computes.
  */
 export const users = pgTable(
   "users",
@@ -50,7 +52,7 @@ export const users = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("users_email_canonical_unique").on(sql`lower(${table.email})`),
+    uniqueIndex("users_email_canonical_unique").on(sql`lower(btrim(${table.email}))`),
   ],
 );
 

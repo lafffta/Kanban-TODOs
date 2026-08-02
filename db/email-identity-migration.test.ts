@@ -84,10 +84,16 @@ test("the migration folds existing accounts onto their canonical address", async
   );
   expect(invites[0].email).toBe("dave@x.com");
 
-  // And from here on the database is the one holding the invariant.
-  await expect(
-    client.query(`INSERT INTO "users" ("id", "email") VALUES ('u9', 'ADA@example.com')`),
-  ).rejects.toMatchObject({ code: "23505" });
+  // And from here on the database is the one holding the invariant — over both
+  // halves of the canonical form, so the state just cleaned up can't recur.
+  for (const [id, bypass] of [
+    ["u9", "ADA@example.com"],
+    ["u10", "  ada@example.com  "],
+  ]) {
+    await expect(
+      client.query(`INSERT INTO "users" ("id", "email") VALUES ($1, $2)`, [id, bypass]),
+    ).rejects.toMatchObject({ code: "23505" });
+  }
 });
 
 test("the migration refuses to merge accounts that already collide", async () => {

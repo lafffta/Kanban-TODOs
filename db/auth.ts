@@ -86,12 +86,21 @@ export type CreateAccountResult =
   | { ok: true; user: PublicUser }
   | { ok: false; error: string };
 
-function isUniqueViolation(err: unknown): boolean {
-  // Drizzle wraps the driver error, so the pg code "23505" may sit on `.cause`.
+/** The index that makes one canonical address one account (see `db/schema.ts`). */
+const EMAIL_IDENTITY_INDEX = "users_email_canonical_unique";
+
+/**
+ * Whether an error is Postgres refusing a second account for one address.
+ * Drizzle wraps driver errors, so the whole `cause` chain is searched rather than
+ * just the top error. A `23505` on some *other* constraint is deliberately not
+ * matched — it would be reported to the user as "that email is taken", which
+ * would be a lie and would bury the real fault.
+ */
+export function isDuplicateEmailViolation(err: unknown): boolean {
   for (let e: unknown = err; e != null; e = (e as { cause?: unknown }).cause) {
-    if (typeof e === "object" && "code" in e && (e as { code?: unknown }).code === "23505") {
-      return true;
-    }
+    if (typeof e !== "object") break;
+    const { code, constraint } = e as { code?: unknown; constraint?: unknown };
+    if (code === "23505" && constraint === EMAIL_IDENTITY_INDEX) return true;
   }
   return false;
 }
@@ -99,8 +108,9 @@ function isUniqueViolation(err: unknown): boolean {
 /**
  * Validate sign-up input and create the account. Returns a discriminated result
  * so callers (server actions) get a friendly message instead of a thrown Zod or
- * unique-constraint error. The DB unique constraint is the source of truth for
- * duplicate emails.
+ * unique-constraint error. The DB unique index is the source of truth for
+ * duplicate emails — including addresses that differ only in case or padding,
+ * which are the same identity (`db/email.ts`).
  */
 export async function createAccount(raw: unknown): Promise<CreateAccountResult> {
   const parsed = signUpSchema.safeParse(raw);
@@ -111,7 +121,7 @@ export async function createAccount(raw: unknown): Promise<CreateAccountResult> 
     const user = await registerUser(parsed.data);
     return { ok: true, user };
   } catch (err) {
-    if (isUniqueViolation(err)) {
+    if (isDuplicateEmailViolation(err)) {
       return { ok: false, error: "That email is already registered." };
     }
     throw err;

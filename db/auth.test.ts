@@ -5,6 +5,7 @@ import { users } from "./schema";
 import {
   authorizeCredentials,
   createAccount,
+  isDuplicateEmailViolation,
   registerUser,
   verifyCredentials,
 } from "./auth";
@@ -124,26 +125,21 @@ test("a second account cannot claim the same address in a different case", async
   }
 });
 
-/** Whether a thrown error is (or wraps) a Postgres unique violation. */
-function isUniqueViolation(err: unknown): boolean {
-  for (let e: unknown = err; e != null; e = (e as { cause?: unknown }).cause) {
-    if (typeof e === "object" && (e as { code?: unknown }).code === "23505") return true;
-  }
-  return false;
-}
-
-test("Postgres refuses a case-colliding account even when the app is bypassed", async () => {
+test("Postgres refuses a colliding account even when the app is bypassed", async () => {
   const canonical = uniqueEmail();
   await db.insert(users).values({ email: canonical });
 
   // A writer that skips `registerUser` — a future OAuth adapter, a seed script —
-  // still cannot mint a second identity for the same address.
-  const collision = await db
-    .insert(users)
-    .values({ email: canonical.toUpperCase() })
-    .then(
-      () => null,
-      (err: unknown) => err,
-    );
-  expect(isUniqueViolation(collision)).toBe(true);
+  // still cannot mint a second identity for the same address. Both halves of the
+  // canonical form are enforced, not just the case fold.
+  for (const bypass of [canonical.toUpperCase(), `  ${canonical}  `]) {
+    const collision = await db
+      .insert(users)
+      .values({ email: bypass })
+      .then(
+        () => null,
+        (err: unknown) => err,
+      );
+    expect(isDuplicateEmailViolation(collision)).toBe(true);
+  }
 });

@@ -30,4 +30,7 @@ UPDATE "users" SET "email" = lower(btrim("email")) WHERE "email" <> lower(btrim(
 -- Invites have been written canonically since they were introduced; this holds
 -- the same invariant for any row that predates or bypassed that.
 UPDATE "board_invites" SET "email" = lower(btrim("email")) WHERE "email" <> lower(btrim("email"));--> statement-breakpoint
-CREATE UNIQUE INDEX "users_email_canonical_unique" ON "users" USING btree (lower("email"));
+-- The index expression matches `canonicalEmail` in db/email.ts exactly. Folding
+-- only case would leave the whitespace half of the identity unenforced — the very
+-- state the UPDATE above just cleaned up.
+CREATE UNIQUE INDEX "users_email_canonical_unique" ON "users" USING btree (lower(btrim("email")));
