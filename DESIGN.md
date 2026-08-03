@@ -80,6 +80,11 @@ deliberately.
   app offline opens straight to the last-seen board (clearly stale, read-only) with an
   "Offline" banner; any mutation is blocked with a toast. No write queue / background sync
   in v1. Custom install affordance via `beforeinstallprompt`.
+  **A cached fallback is marked as one** (`X-Kanban-Cached`): the worker cannot tell
+  airplane mode from a dead deployment, so rather than guess it says only "this did not
+  come from the server", and a read carrying the marker is a *failed* read. Otherwise a
+  poll the server never answered comes back 200 with a token that cannot have moved, and
+  a board nobody is syncing looks current forever.
 
 ---
 

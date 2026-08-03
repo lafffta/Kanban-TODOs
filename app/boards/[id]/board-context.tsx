@@ -71,7 +71,11 @@ type BoardControls = {
   membership: BoardMembership;
   /** False when the device has no network: the board is stale and read-only (D8). */
   online: boolean;
-  /** True while the polling loop is failing (offline, or access just revoked). */
+  /**
+   * True while the polling loop is failing — the server is unreachable, or access
+   * was just revoked. A poll answered out of the offline cache counts as failing:
+   * see `CACHED_RESPONSE_HEADER` in `board-data.ts`.
+   */
   outOfSync: boolean;
   /** Run a board write with the optimistic + reconcile protocol. */
   run: (mutation: BoardMutation) => Promise<ActionResult>;
@@ -224,7 +228,9 @@ export function BoardProvider({
         membership,
         online,
         // Offline has its own banner saying the same thing more precisely; this
-        // notice is for the case the network is up but the board isn't reachable.
+        // notice is for the case the network is up but the board isn't reachable —
+        // which the query can only see because a poll the service worker answered
+        // from its cache arrives here as an error rather than as an unchanged token.
         outOfSync: versionQuery.isError && online,
         run,
       }}
