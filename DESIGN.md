@@ -96,6 +96,14 @@ deliberately.
   keeps the session alive and is named on screen. Signing out over a device that still
   holds the boards is the one outcome worth refusing: it looks done, and the next person
   on a shared phone is who finds out otherwise.
+  Two deliberate softenings of "must not complete", both because the strict reading has
+  a worse failure than the one it prevents. A refused sign-out leaves the **session**
+  live on the shared phone — worse than a stale cached copy — so the failure offers an
+  explicit, consequence-named way out ("sign out and leave the copy on this device")
+  rather than trapping someone whose storage is broken. And because a request already
+  on the wire can be filed into a swept cache after the last read-back, the sign-in
+  page sweeps once more on arrival: no session there, so clearing is unconditionally
+  safe, and it closes the one window the sign-out can't see from where it stands.
 
 ---
 

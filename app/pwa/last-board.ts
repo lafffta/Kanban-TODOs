@@ -60,6 +60,20 @@ export function forgetBoardIfLast(storage: StorageLike, boardId: string): void {
   if (readLastBoard(storage)?.id === boardId) forgetLastBoard(storage);
 }
 
+/**
+ * The raw note, as stored — for the sign-out read-back, which needs a storage
+ * that refuses to answer to *stay* refused rather than read as "nothing there"
+ * (ticket 19). `readLastBoard` swallows that, correctly: a launch that can't read
+ * the note simply has no board to open. A clearing that swallowed it would be
+ * claiming the device is empty on the strength of not having managed to look.
+ *
+ * Deliberately unparsed. Anything still under the key is something `clear` failed
+ * to remove, whether or not this build can make sense of it.
+ */
+export function peekLastBoardNote(storage: StorageLike): string | null {
+  return storage.getItem(KEY);
+}
+
 /** Drop the note — on sign-out, so the next person doesn't land on it. */
 export function forgetLastBoard(storage: StorageLike): void {
   try {

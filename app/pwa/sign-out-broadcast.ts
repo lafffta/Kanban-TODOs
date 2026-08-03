@@ -30,7 +30,7 @@ export function signOutAnnouncement(from: string): Announcement {
 }
 
 /**
- * This document's id.
+ * This tab's id.
  *
  * A channel delivers to every *other* channel object on the origin — including
  * the ones in the tab that posted, which is not another tab. Without an id to
@@ -38,11 +38,10 @@ export function signOutAnnouncement(from: string): Announcement {
  * own board away and stop half-way through emptying the device.
  *
  * Assigned lazily rather than at module scope: this module is also evaluated on
- * the server, where "document" means nothing and one id would be shared by every
- * render.
+ * the server, where there are no tabs and one id would be shared by every render.
  */
 let id: string | null = null;
-function thisDocument(): string {
+function thisTabId(): string {
   id ??= `tab-${Math.random().toString(36).slice(2)}-${Date.now()}`;
   return id;
 }
@@ -55,10 +54,10 @@ function thisDocument(): string {
  * message arrived would look, to the person using it, exactly like being signed
  * out for no reason.
  */
-export function isSignOutFromAnotherTab(data: unknown, self: string): boolean {
+export function isSignOutFromAnotherTab(data: unknown, thisTab: string): boolean {
   if (typeof data !== "object" || data === null) return false;
   const { type, from } = data as { type?: unknown; from?: unknown };
-  return type === SIGNED_OUT && typeof from === "string" && from !== self;
+  return type === SIGNED_OUT && typeof from === "string" && from !== thisTab;
 }
 
 /** Tell the other tabs to let go of this account's data. */
@@ -66,7 +65,7 @@ export function announceSignOut(): void {
   if (typeof BroadcastChannel === "undefined") return;
   try {
     const channel = new BroadcastChannel(SIGN_OUT_CHANNEL);
-    channel.postMessage(signOutAnnouncement(thisDocument()));
+    channel.postMessage(signOutAnnouncement(thisTabId()));
     channel.close();
   } catch {
     // No channel is a coordination failure, not a clearing failure: this tab still
@@ -85,9 +84,9 @@ export function onSignOut(handle: () => void): () => void {
     return () => {};
   }
 
-  const self = thisDocument();
+  const thisTab = thisTabId();
   const listener = (event: MessageEvent) => {
-    if (isSignOutFromAnotherTab(event.data, self)) handle();
+    if (isSignOutFromAnotherTab(event.data, thisTab)) handle();
   };
   channel.addEventListener("message", listener);
 

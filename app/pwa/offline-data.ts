@@ -8,6 +8,7 @@ import {
   persistedQueriesArea,
   releaseDevice,
   workerCachesArea,
+  type Clearable,
   type ClearOutcome,
 } from "./device-clearing";
 import { forgetBoardIfLast, type StorageLike } from "./last-board";
@@ -23,12 +24,31 @@ import { announceSignOut, onSignOut } from "./sign-out-broadcast";
  * This is the part that knows about `window`.
  */
 
-/** `window.localStorage`, reached lazily — see `last-board.ts` for why that matters. */
+/**
+ * `window.localStorage`, reached inside the calls rather than captured here: this
+ * module is evaluated on the server too, where there is no `window` to touch.
+ */
 const deviceStorage: StorageLike = {
   getItem: (key) => window.localStorage.getItem(key),
   setItem: (key, value) => window.localStorage.setItem(key, value),
   removeItem: (key) => window.localStorage.removeItem(key),
 };
+
+/**
+ * Everywhere on this device that holds something of the signed-in user's.
+ *
+ * Built per call, not once: each one is a handle to browser storage, and building
+ * them at module scope would mean touching that storage during a server render.
+ */
+export function deviceAreas(): Clearable[] {
+  return [
+    persistedQueriesArea(indexedDbCacheStore()),
+    lastBoardArea(deviceStorage),
+    // Cache Storage and the service worker that fills it both need a secure
+    // context, so a browser without the one cached nothing through the other.
+    workerCachesArea(typeof caches === "undefined" ? null : caches),
+  ];
+}
 
 /**
  * The persister this document is using, so sign-out can switch it off before it
@@ -54,25 +74,31 @@ function usePersister(): StoppablePersister {
  * the boards on it.
  */
 export function useClearDevice(): () => Promise<ClearOutcome> {
+  const letGo = useLetGo();
+
+  return useCallback(
+    () => releaseDevice({ announce: announceSignOut, letGo, areas: deviceAreas() }),
+    [letGo],
+  );
+}
+
+/**
+ * Let go of the copy this document is holding: stop writing it to the device, and
+ * drop it out of memory.
+ *
+ * Permanent, deliberately. There is no resuming: either the session is ending, or
+ * the clearing that follows has just failed — and a device we couldn't empty is
+ * the last one that should be handed more to hold. A reload starts a fresh
+ * persister when there's a session to justify one.
+ */
+function useLetGo(): () => void {
   const queryClient = useQueryClient();
   const persister = usePersister();
 
-  return useCallback(
-    () =>
-      releaseDevice({
-        announce: announceSignOut,
-        stopPersisting: () => persister.stop(),
-        dropMemory: () => queryClient.clear(),
-        areas: [
-          persistedQueriesArea(indexedDbCacheStore()),
-          lastBoardArea(deviceStorage),
-          // Cache Storage and the service worker that fills it both need a secure
-          // context, so a browser without the one cached nothing through the other.
-          workerCachesArea(typeof caches === "undefined" ? null : caches),
-        ],
-      }),
-    [persister, queryClient],
-  );
+  return useCallback(() => {
+    persister.stop();
+    queryClient.clear();
+  }, [persister, queryClient]);
 }
 
 /**
@@ -90,18 +116,16 @@ export function useClearDevice(): () => Promise<ClearOutcome> {
  * the screen, and the person decides when to go anywhere.
  */
 export function useSignedOutElsewhere(): boolean {
-  const queryClient = useQueryClient();
-  const persister = usePersister();
+  const letGo = useLetGo();
   const [signedOut, setSignedOut] = useState(false);
 
   useEffect(
     () =>
       onSignOut(() => {
-        persister.stop();
-        queryClient.clear();
+        letGo();
         setSignedOut(true);
       }),
-    [persister, queryClient],
+    [letGo],
   );
 
   return signedOut;

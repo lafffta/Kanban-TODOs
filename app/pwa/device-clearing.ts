@@ -1,5 +1,5 @@
 import type { PersistedCacheStore } from "./query-persistence";
-import { forgetLastBoard, readLastBoard, type StorageLike } from "./last-board";
+import { forgetLastBoard, peekLastBoardNote, type StorageLike } from "./last-board";
 
 /**
  * What signing out has to take off the device, and how it knows that it did
@@ -39,18 +39,21 @@ export type ClearOutcome = { cleared: true } | { cleared: false; remaining: stri
 
 /**
  * How many times an area is emptied before its contents are called permanent.
- * More than one because of the one failure that isn't permanent: another tab's
- * persister flushing the cache back between the clear and the read-back. It has
- * been told to stop (see `announceSignOut`), and this is the moment it needs to
- * act on that.
+ *
+ * More than one because of the failures that aren't permanent — all of them
+ * writes already in flight when the clearing started. Another tab's persister
+ * flushing the query cache back; the service worker filing the response to a poll
+ * that was issued a moment before its tab was told to stop. Both have been told
+ * (see `announceSignOut`), and the retries are the time they're given to act on
+ * it. The pauses widen so the total window is most of a second, which is long
+ * enough for a request that was already on the wire to land.
  */
-const ATTEMPTS = 3;
+export const CLEAR_ATTEMPTS = 4;
 
-/** Long enough for a tab that's shutting down to finish its last write. */
-const RETRY_PAUSE_MS = 60;
+/** Grows with each attempt: 100ms, 200ms, 300ms. */
+const RETRY_PAUSE_MS = 100;
 
 type ClearOptions = {
-  attempts?: number;
   /** Injected so tests don't wait; the browser gets a real pause. */
   pause?: (attempt: number) => Promise<void>;
 };
@@ -66,11 +69,10 @@ export async function clearDevice(
   areas: readonly Clearable[],
   options: ClearOptions = {},
 ): Promise<ClearOutcome> {
-  const attempts = options.attempts ?? ATTEMPTS;
   const pause = options.pause ?? ((attempt) => sleep(attempt * RETRY_PAUSE_MS));
 
   const survivors = await Promise.all(
-    areas.map(async (area) => ((await emptied(area, attempts, pause)) ? null : area.name)),
+    areas.map(async (area) => ((await emptied(area, pause)) ? null : area.name)),
   );
 
   const remaining = survivors.filter((name): name is string => name !== null);
@@ -81,31 +83,28 @@ export async function clearDevice(
 export type Release = {
   /** Tell the other tabs to stop holding this account's data. */
   announce: () => void;
-  /** Stop this document writing the cache back to the device. */
-  stopPersisting: () => void;
-  /** Drop the copy held in memory — readable on screen, and one flush from disk. */
-  dropMemory: () => void;
+  /** Stop this document writing the cache back, and drop what it holds in memory. */
+  letGo: () => void;
   areas: readonly Clearable[];
 };
 
 /**
  * Let go of the device, and say whether it's empty.
  *
- * The order is the whole point, and it is why this is a function rather than four
+ * The order is the whole point, and it is why this is a function rather than three
  * calls at the call site. Announcing comes first, so the other tabs have stopped
- * writing before there's anything to undo. Stopping this document's persister and
- * dropping its in-memory cache come next, because a live cache is one settled poll
- * away from being back on disk — clearing storage underneath one only empties the
- * device for as long as it takes a query to finish. Emptying and reading back the
- * device itself is last, once nothing is left that could refill it.
+ * writing before there's anything to undo. This document lets go of its own copy
+ * next, because a live cache is one settled poll away from being back on disk —
+ * clearing storage underneath one only empties the device for as long as it takes
+ * a query to finish. Emptying the device itself and reading it back is last, once
+ * nothing is left that could refill it.
  */
 export async function releaseDevice(
   release: Release,
   options: ClearOptions = {},
 ): Promise<ClearOutcome> {
   release.announce();
-  release.stopPersisting();
-  release.dropMemory();
+  release.letGo();
   return clearDevice(release.areas, options);
 }
 
@@ -131,10 +130,9 @@ export async function signOutOnceCleared(
 /** Clear an area until reading it back shows nothing, or until we run out of tries. */
 async function emptied(
   area: Clearable,
-  attempts: number,
   pause: (attempt: number) => Promise<void>,
 ): Promise<boolean> {
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  for (let attempt = 1; attempt <= CLEAR_ATTEMPTS; attempt += 1) {
     try {
       await area.clear();
     } catch {
@@ -150,7 +148,7 @@ async function emptied(
       return false;
     }
 
-    if (attempt < attempts) await pause(attempt);
+    if (attempt < CLEAR_ATTEMPTS) await pause(attempt);
   }
   return false;
 }
@@ -178,7 +176,7 @@ export function persistedQueriesArea(
   store: Pick<PersistedCacheStore, "read" | "clear">,
 ): Clearable {
   return {
-    name: "the boards saved for offline use",
+    name: "saved boards",
     clear: () => store.clear(),
     async remains() {
       const client = await store.read();
@@ -190,7 +188,15 @@ export function persistedQueriesArea(
   };
 }
 
-/** The note an offline launch follows back to the last board seen. */
+/**
+ * The note an offline launch follows back to the last board seen.
+ *
+ * The read-back is the raw key, not `readLastBoard`: that one answers "is there a
+ * board to open", swallowing a storage that refuses so a launch can carry on
+ * without the shortcut. Here the question is the opposite one — "is there anything
+ * left" — and a storage that won't answer it has not answered "no". Whatever is
+ * still under the key is also something `clear` failed to remove, parseable or not.
+ */
 export function lastBoardArea(storage: StorageLike): Clearable {
   return {
     name: "the last board you opened",
@@ -198,7 +204,7 @@ export function lastBoardArea(storage: StorageLike): Clearable {
       forgetLastBoard(storage);
     },
     async remains() {
-      return readLastBoard(storage) !== null;
+      return peekLastBoardNote(storage) !== null;
     },
   };
 }
@@ -215,15 +221,19 @@ export function lastBoardArea(storage: StorageLike): Clearable {
  *
  * The shell cache survives. It holds the offline page, the icons and the build
  * output — identical for every account, and dropping it would only mean the next
- * person's first launch has nothing to open. `public/sw.js` draws the same line
- * (it ships as a plain script and can't share this constant); the test below is
- * what keeps the two honest.
+ * person's first launch has nothing to open.
+ *
+ * Which caches those are is `public/sw.js`'s to say, and it ships as a plain
+ * script that can't share a constant with this file. So the names are matched by
+ * the prefixes the worker builds them from, and the test reads them back out of
+ * the worker's own source — rename a cache there and this stops sweeping it,
+ * silently, which is a leak rather than a bug you'd notice.
  */
 export function workerCachesArea(caches: CacheStorageLike | null): Clearable {
   const ours = (name: string) => name.startsWith("kanban-") && !name.startsWith("kanban-shell-");
 
   return {
-    name: "the pages saved for offline use",
+    name: "saved pages",
     async clear() {
       // A browser with no Cache Storage also has no service worker — both need a
       // secure context — so there is nothing here that was ever cached.

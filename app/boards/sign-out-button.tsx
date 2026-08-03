@@ -67,10 +67,12 @@ export function SignOutButton({ signOut }: { signOut: () => Promise<void> }) {
             again, or sign out anyway if this device is yours.
           </p>
           {/* Its own form, so it posts to the same action with no JavaScript in the
-              way — the escape hatch has to be the reliable path. */}
+              way — the escape hatch has to be the reliable path. Deliberately plain
+              text next to a real button: retrying is the action being offered, and
+              this one names what it costs rather than reading as the way out. */}
           <form action={signOut} className="mt-2">
-            <button type="submit" className="text-sm font-medium underline">
-              Sign out anyway
+            <button type="submit" className="text-sm underline opacity-70">
+              Sign out and leave the copy on this device
             </button>
           </form>
         </div>

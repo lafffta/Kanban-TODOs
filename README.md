@@ -89,7 +89,9 @@ Every area is **read back afterwards**, and anything that can't be proven gone
 is named on screen with the session left up — a sign-out that leaves the boards
 on a shared phone is worse than one that visibly didn't finish. Other open tabs
 are told over a `BroadcastChannel` so they stop writing their cache back, and
-they put the board away rather than sit on a readable copy.
+they put the board away rather than sit on a readable copy. The sign-in page
+sweeps once more on arrival (`app/pwa/leftover-sweep.tsx`), which catches a
+response the worker filed after the sign-out's last check.
 
 Verifying it by hand — the shared-device check, which the automated tests
 cannot stand in for:

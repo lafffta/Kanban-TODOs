@@ -1,5 +1,7 @@
 import { expect, test } from "vitest";
+import { readFileSync } from "node:fs";
 import {
+  CLEAR_ATTEMPTS,
   clearDevice,
   lastBoardArea,
   persistedQueriesArea,
@@ -120,11 +122,11 @@ test("an area that can't be inspected counts as still holding data", async () =>
 test("a device that keeps refilling is reported instead of retried forever", async () => {
   const relentless = area("cached boards", { survives: true });
 
-  expect(await clearDevice([relentless], { ...immediately, attempts: 3 })).toEqual({
+  expect(await clearDevice([relentless], immediately)).toEqual({
     cleared: false,
     remaining: ["cached boards"],
   });
-  expect(relentless.state.clears).toBe(3);
+  expect(relentless.state.clears).toBe(CLEAR_ATTEMPTS);
 });
 
 // ---------------------------------------------------------------------------
@@ -145,19 +147,13 @@ test("nothing is holding the device by the time it's emptied", async () => {
   await releaseDevice(
     {
       announce: () => done.push("announced"),
-      stopPersisting: () => done.push("stopped persisting"),
-      dropMemory: () => done.push("dropped memory"),
+      letGo: () => done.push("let go"),
       areas: [watched("cached boards")],
     },
     immediately,
   );
 
-  expect(done).toEqual([
-    "announced",
-    "stopped persisting",
-    "dropped memory",
-    "cleared cached boards",
-  ]);
+  expect(done).toEqual(["announced", "let go", "cleared cached boards"]);
 });
 
 test("the session is dropped only once the device is empty", async () => {
@@ -214,6 +210,25 @@ test("the last-board note is gone, and is read back to prove it", async () => {
   expect(await note.remains()).toBe(false);
 });
 
+test("a storage that won't answer is never mistaken for an empty one", async () => {
+  // Private-mode browsers throw on access rather than returning null. `readLastBoard`
+  // swallows that so a launch can carry on without the shortcut; the read-back must
+  // not, or "we couldn't look" is reported as "there's nothing there" — the same
+  // silent success as the blocked delete this ticket exists to end.
+  const hostile = {
+    getItem: (): string | null => {
+      throw new Error("denied");
+    },
+    setItem: () => {},
+    removeItem: () => {},
+  };
+
+  expect(await clearDevice([lastBoardArea(hostile)], immediately)).toEqual({
+    cleared: false,
+    remaining: [lastBoardArea(hostile).name],
+  });
+});
+
 test("a storage that silently keeps the note leaves it reported", async () => {
   // Some browsers accept a write and discard it; a `removeItem` that returns
   // without removing anything must not read as a cleared device.
@@ -252,13 +267,36 @@ test("an empty snapshot is nothing to restore", async () => {
   expect(await cache.remains()).toBe(false);
 });
 
+/**
+ * The caches `public/sw.js` actually opens, read out of the worker's own source.
+ *
+ * The worker ships as a plain script and can't share a constant with the sweep,
+ * so the two agree by prefix — which is exactly the kind of agreement that rots
+ * silently. Renaming a cache in the worker leaves a user's pages sitting in one
+ * this no longer matches, and nothing else would notice.
+ */
+function workerCacheNames(): { shell: string; userData: string[] } {
+  const source = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
+  const version = source.match(/const VERSION = "([^"]+)"/)?.[1];
+  expect(version, "public/sw.js no longer declares a VERSION").toBeTypeOf("string");
+
+  const declared = [...source.matchAll(/const (\w+_CACHE) = `([^`]+)`/g)].map(([, id, template]) => ({
+    id,
+    name: template.replace("${VERSION}", version as string),
+  }));
+  // Three today: shell, pages, data. A fourth is a cache someone has to decide
+  // about, and it arrives here rather than in a bug report.
+  expect(declared.map((cache) => cache.id)).toEqual(["SHELL_CACHE", "PAGE_CACHE", "DATA_CACHE"]);
+
+  return {
+    shell: declared[0].name,
+    userData: declared.slice(1).map((cache) => cache.name),
+  };
+}
+
 test("the pages and API responses cached for the signed-in user are swept", async () => {
-  const caches = fakeCaches([
-    "kanban-pages-v1",
-    "kanban-data-v1",
-    "kanban-shell-v1",
-    "workbox-precache",
-  ]);
+  const { shell, userData } = workerCacheNames();
+  const caches = fakeCaches([...userData, shell, "workbox-precache"]);
 
   const swept = workerCachesArea(caches);
   expect(await swept.remains()).toBe(true);
@@ -267,7 +305,34 @@ test("the pages and API responses cached for the signed-in user are swept", asyn
 
   // The shell is the same for everyone — dropping it would only mean the next
   // person's first launch has no offline page. Another origin's caches aren't ours.
-  expect([...caches.names]).toEqual(["kanban-shell-v1", "workbox-precache"]);
+  expect([...caches.names]).toEqual([shell, "workbox-precache"]);
+});
+
+test("a response the worker files after the sweep is swept too", async () => {
+  // The window the old timeout couldn't see and this replaces: a poll issued just
+  // before its tab was told to stop still resolves, and the worker still files it —
+  // into the cache that was swept a moment earlier. One pass would report a cleared
+  // device over a fresh copy of the board.
+  const { shell, userData } = workerCacheNames();
+  const caches = fakeCaches([shell]);
+  let filed = false;
+
+  const swept = workerCachesArea({
+    keys: caches.keys,
+    delete: async (name: string) => {
+      const deleted = await caches.delete(name);
+      // The late response lands right after the first deletion.
+      if (!filed) {
+        filed = true;
+        caches.names.add(userData[0]);
+      }
+      return deleted;
+    },
+  });
+
+  caches.names.add(userData[0]);
+  expect(await clearDevice([swept], immediately)).toEqual({ cleared: true });
+  expect([...caches.names]).toEqual([shell]);
 });
 
 test("a browser with no Cache Storage has no cached pages to answer for", async () => {

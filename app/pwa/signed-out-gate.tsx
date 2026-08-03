@@ -21,16 +21,23 @@ export function SignedOutGate({ children }: { children: React.ReactNode }) {
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-      <h1 className="text-xl font-semibold">Signed out</h1>
+      <h1 className="text-xl font-semibold">This tab has let go of its copy</h1>
+      {/* Careful about what this claims. The other tab announced that it was
+          clearing the device, not that it succeeded — if it couldn't, it holds the
+          session open and nobody is signed out. So this says only what is true
+          either way, and reloading lands wherever the truth turns out to be: the
+          sign-in page if the sign-out went through, the board if it didn't. */}
       <p className="max-w-sm text-sm opacity-70">
-        This account was signed out in another tab, and the boards saved on this device
-        for offline use have been cleared.
+        Another tab signed out and cleared the boards saved on this device for offline
+        use. Reload to carry on.
       </p>
-      {/* A plain link: a full page load, when the person asks for one, long after
-          the clearing has finished. */}
-      <a href="/sign-in" className="text-sm font-medium underline">
-        Sign in again
-      </a>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="rounded-lg border border-black/15 px-4 py-2 text-sm font-medium dark:border-white/20"
+      >
+        Reload
+      </button>
     </main>
   );
 }
