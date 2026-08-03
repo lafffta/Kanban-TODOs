@@ -2,7 +2,6 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { BoardMemberProfile } from "@/db/boards";
 import { useOnline } from "@/app/pwa/connection";
 import { useOfflineWriteGate } from "@/app/pwa/offline-write-gate";
 import {
@@ -14,6 +13,7 @@ import {
   type PolledBoard,
   type ThreadComment,
 } from "./board-data";
+import { projectMembership, type BoardMembership } from "./membership";
 import { createReconciler, type Reconciler } from "./reconciler";
 import {
   runBoardWrite,
@@ -61,10 +61,14 @@ export function patchComments(
 type BoardControls = {
   boardId: string;
   currentUserId: string;
-  isOwner: boolean;
   /** The live board — server-rendered on first paint, polled from then on. */
   board: BoardData;
-  members: BoardMemberProfile[];
+  /**
+   * Who is on the board and what the viewer may do, projected from that same live
+   * payload — so a promotion or demotion reaches every surface on the next poll
+   * (ticket 17). Server-side checks remain the authority on what is permitted.
+   */
+  membership: BoardMembership;
   /** False when the device has no network: the board is stale and read-only (D8). */
   online: boolean;
   /** True while the polling loop is failing (offline, or access just revoked). */
@@ -105,18 +109,23 @@ export function useBoard(): BoardControls {
  * started at, and a result that no longer matches — or that arrives while a write
  * is in flight — is dropped in favour of what's already cached. Nothing is lost:
  * the write's own invalidate brings a payload that includes it.
+ *
+ * **Membership.** The payload carries the board's members, so who is on the board
+ * and what the viewer may do are projected out of it rather than passed in from the
+ * server render (ticket 17) — one `BoardMembership` feeding the members panel, the
+ * assignee picker, the heading's owner controls and the comment thread. A viewer
+ * promoted or demoted mid-session therefore sees their controls change on the next
+ * poll; the server still decides what is actually permitted.
  */
 export function BoardProvider({
   boardId,
   currentUserId,
-  isOwner,
   initialBoard,
   renderedAt,
   children,
 }: {
   boardId: string;
   currentUserId: string;
-  isOwner: boolean;
   /** The server-rendered payload, so the first paint needs no fetch. */
   initialBoard: BoardData;
   /** When the server read that payload — see `initialDataUpdatedAt` below. */
@@ -162,6 +171,13 @@ export function BoardProvider({
   const board = boardQuery.data;
   const polledVersion = versionQuery.data;
 
+  // Re-read on every payload, never captured at render: the viewer's role is a row
+  // another owner can change while they watch (ticket 17).
+  const membership = useMemo(
+    () => projectMembership(board.members, currentUserId),
+    [board.members, currentUserId],
+  );
+
   // The version guard: the only trigger for refetching the heavy payload.
   useEffect(() => {
     if (polledVersion === undefined || polledVersion === board.version) return;
@@ -204,9 +220,8 @@ export function BoardProvider({
       value={{
         boardId,
         currentUserId,
-        isOwner,
         board,
-        members: board.members,
+        membership,
         online,
         // Offline has its own banner saying the same thing more precisely; this
         // notice is for the case the network is up but the board isn't reachable.

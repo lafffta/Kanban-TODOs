@@ -45,7 +45,9 @@ type VersionRow = {
  * Comments have no `updatedAt` because they're add + delete only (D7), so their
  * `createdAt` plus the count covers them — and they belong in the token at all
  * because a card's face shows a comment count. Members are here so a teammate who
- * accepts an invite shows up in the assignee picker without a reload.
+ * accepts an invite shows up in the assignee picker without a reload, and so a
+ * promotion or demotion reaches the promoted user's own screen: that changes no
+ * count and creates no row, which is what `board_members.updatedAt` is for.
  *
  * The token is compared for equality only, never ordered: it says *different*,
  * not *newer*. One round trip, one connection — polls are the reason production
@@ -76,7 +78,7 @@ export async function boardVersion(boardId: string): Promise<string> {
         where ${cards.boardId} = ${boardId}) as comment_stamp,
       (select count(*)::text from ${boardMembers}
         where ${boardMembers.boardId} = ${boardId}) as member_count,
-      (select ${stamp(boardMembers.createdAt)} from ${boardMembers}
+      (select ${stamp(boardMembers.updatedAt)} from ${boardMembers}
         where ${boardMembers.boardId} = ${boardId}) as member_stamp
   `);
 

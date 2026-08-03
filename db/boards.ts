@@ -260,6 +260,12 @@ export async function removeMember(input: {
  * Change a member's role (owner-only, D1) — promote a member to co-owner or demote
  * one back. The board's creator is not a valid target, so a board can never be left
  * without an owner.
+ *
+ * `updatedAt` moves with the role, which is what carries the change to everyone
+ * *else* looking at the board: the version token is built from it, so the promoted
+ * user's next poll brings a payload saying they now govern (D4). Writing the role
+ * without the timestamp would leave the change invisible until a reload, since a
+ * promotion changes no row count and creates no row.
  */
 export async function changeMemberRole(input: {
   boardId: string;
@@ -271,6 +277,6 @@ export async function changeMemberRole(input: {
 
   await db
     .update(boardMembers)
-    .set({ role: input.role })
+    .set({ role: input.role, updatedAt: new Date() })
     .where(membershipOf(input.boardId, input.userId));
 }
