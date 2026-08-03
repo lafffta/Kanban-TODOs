@@ -25,12 +25,15 @@ export type BoardMembership = {
   role: BoardRole | null;
   /** Whether the viewer may govern: invite, remove, set roles, rename/delete (D1). */
   isOwner: boolean;
+  /** Who created the board — the one membership nobody may remove or demote (D5). */
+  creatorId: string;
 };
 
 /** Read one viewer's standing out of a board's member list. */
 export function projectMembership(
   members: BoardMemberProfile[],
   viewerId: string,
+  creatorId: string,
 ): BoardMembership {
   const self = members.find((member) => member.id === viewerId) ?? null;
   return {
@@ -38,7 +41,22 @@ export function projectMembership(
     self,
     role: self?.role ?? null,
     isOwner: self?.role === "owner",
+    creatorId,
   };
+}
+
+/**
+ * Whether the viewer may remove this member or change their role. The client-side
+ * mirror of the db layer's `requireManageableMember`: the viewer must own the
+ * board, and the target must not be its creator — that owner row is what keeps the
+ * board governed, so it can neither be removed nor demoted (D5, no ownership
+ * transfer in v1). The db layer refuses either way; this is what the panel offers.
+ */
+export function canManageMember(
+  membership: BoardMembership,
+  memberId: string,
+): boolean {
+  return membership.isOwner && memberId !== membership.creatorId;
 }
 
 /**

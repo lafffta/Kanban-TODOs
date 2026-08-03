@@ -174,8 +174,8 @@ export function BoardProvider({
   // Re-read on every payload, never captured at render: the viewer's role is a row
   // another owner can change while they watch (ticket 17).
   const membership = useMemo(
-    () => projectMembership(board.members, currentUserId),
-    [board.members, currentUserId],
+    () => projectMembership(board.members, currentUserId, board.board.ownerId),
+    [board.members, board.board.ownerId, currentUserId],
   );
 
   // The version guard: the only trigger for refetching the heavy payload.

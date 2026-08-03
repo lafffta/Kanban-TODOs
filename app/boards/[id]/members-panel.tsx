@@ -6,6 +6,7 @@ import type { BoardMemberProfile } from "@/db/boards";
 import type { BoardRole } from "@/db/schema";
 import { useOfflineWriteGate } from "@/app/pwa/offline-write-gate";
 import { useBoard } from "./board-context";
+import { canManageMember } from "./membership";
 import { Avatar, displayName } from "./avatar";
 import {
   changeMemberRoleAction,
@@ -89,6 +90,11 @@ function InviteLink({ link }: { link: string }) {
  * viewer held at render. A newly promoted owner would otherwise see an empty
  * pending-invite list until they reloaded. Re-running the server render is what
  * fills it in, and is equally what drops it again on demotion.
+ *
+ * It watches the viewer's *own* role only, so a busy board's other promotions cost
+ * nothing. Should that role go to null — the viewer is off the board entirely — the
+ * re-render's `requireBoardMember` throws and `redirectOnBoardDenial` sends them to
+ * their boards list, which is the right end for someone who was removed.
  */
 function useRefreshOnRoleChange(role: BoardRole | null): void {
   const router = useRouter();
@@ -118,9 +124,8 @@ function useRefreshOnRoleChange(role: BoardRole | null): void {
  * board governed, so it can't be removed or demoted (D5 — no ownership transfer).
  */
 export function MembersPanel({ invites }: { invites: PendingInvite[] }) {
-  const { boardId, currentUserId, board, membership } = useBoard();
+  const { boardId, currentUserId, membership } = useBoard();
   const { members, isOwner } = membership;
-  const creatorId = board.board.ownerId;
   useRefreshOnRoleChange(membership.role);
 
   const [email, setEmail] = useState("");
@@ -182,7 +187,7 @@ export function MembersPanel({ invites }: { invites: PendingInvite[] }) {
 
       <ul className="mt-3 space-y-2">
         {members.map((member) => {
-          const isCreator = member.id === creatorId;
+          const isCreator = member.id === membership.creatorId;
           return (
             <li key={member.id} className="flex items-center gap-2 text-sm">
               <Avatar user={member} size={24} />
@@ -193,7 +198,7 @@ export function MembersPanel({ invites }: { invites: PendingInvite[] }) {
                 )}
               </span>
 
-              {isOwner && !isCreator ? (
+              {canManageMember(membership, member.id) ? (
                 <>
                   <select
                     value={member.role}

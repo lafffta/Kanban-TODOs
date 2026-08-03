@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
 import {
@@ -266,6 +266,12 @@ export async function removeMember(input: {
  * user's next poll brings a payload saying they now govern (D4). Writing the role
  * without the timestamp would leave the change invisible until a reload, since a
  * promotion changes no row count and creates no row.
+ *
+ * The stamp is `now()` — read from Postgres, not from this process. The token is
+ * `max(updated_at)`, and every other value in that column comes from the database
+ * clock (`defaultNow()` when a member joins). Stamping this one from the app clock
+ * would mean a skewed serverless instance could write *below* the running max, and
+ * the token would sit still on the one change it exists to carry.
  */
 export async function changeMemberRole(input: {
   boardId: string;
@@ -277,6 +283,6 @@ export async function changeMemberRole(input: {
 
   await db
     .update(boardMembers)
-    .set({ role: input.role, updatedAt: new Date() })
+    .set({ role: input.role, updatedAt: sql`now()` })
     .where(membershipOf(input.boardId, input.userId));
 }
