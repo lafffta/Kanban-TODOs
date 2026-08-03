@@ -1,9 +1,11 @@
-import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
 import {
   boardMembers,
   boards,
+  cards,
+  comments,
   users,
   type Board,
   type BoardMember,
@@ -253,7 +255,36 @@ export async function removeMember(input: {
 }): Promise<void> {
   await requireManageableMember(input);
 
-  await db.delete(boardMembers).where(membershipOf(input.boardId, input.userId));
+  await db.transaction(async (tx) => {
+    // Order matters: the membership goes first, so anything the removal has to
+    // repair is already unable to be created again by the time we repair it.
+    // Their card assignments are nulled by this delete itself — the composite
+    // `cards (board_id, assignee_id) -> board_members` constraint (ticket 16).
+    await tx.delete(boardMembers).where(membershipOf(input.boardId, input.userId));
+
+    // Authorship is the other half, and no constraint can carry it: unlike an
+    // assignee, a *creator* is not required to still be a member — that is the
+    // whole point of keeping the content. So it is detached explicitly, scoped to
+    // this board, leaving their work on every other board exactly as it was.
+    await tx
+      .update(cards)
+      .set({ createdById: null })
+      .where(and(eq(cards.boardId, input.boardId), eq(cards.createdById, input.userId)));
+
+    // Comments carry no `boardId`, so they are reached through their cards.
+    await tx
+      .update(comments)
+      .set({ authorId: null })
+      .where(
+        and(
+          eq(comments.authorId, input.userId),
+          inArray(
+            comments.cardId,
+            tx.select({ id: cards.id }).from(cards).where(eq(cards.boardId, input.boardId)),
+          ),
+        ),
+      );
+  });
 }
 
 /**

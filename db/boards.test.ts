@@ -3,7 +3,7 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { closeDb, db } from "./index";
 import { registerUser } from "./auth";
-import { boardInvites, boardMembers } from "./schema";
+import { boardInvites, boardMembers, users } from "./schema";
 import {
   BoardAccessError,
   boardNameSchema,
@@ -334,4 +334,79 @@ test("managing someone who isn't a member is refused", async () => {
       actorId: owner.id,
     }),
   ).rejects.toMatchObject(refused);
+});
+
+// --- Former-member attribution on removal (ticket 20) -----------------------
+
+/** A board with an owner, a member, and content the member created on it. */
+async function boardWithMemberContent() {
+  const owner = await registerUser({ email: uniqueEmail(), password: "correct horse battery" });
+  const member = await registerUser({ email: uniqueEmail(), password: "correct horse battery" });
+  const board = await createBoard({ name: "Board", ownerId: owner.id });
+  await db.insert(boardMembers).values({ boardId: board.id, userId: member.id, role: "member" });
+
+  const column = await createColumn({ boardId: board.id, name: "To Do", userId: owner.id });
+  const card = await createCard({
+    boardId: board.id,
+    columnId: column.id,
+    title: "Theirs",
+    userId: member.id,
+  });
+  await assignCard({ cardId: card.id, assigneeId: member.id, userId: owner.id });
+  const comment = await addComment({ cardId: card.id, body: "Mine", userId: member.id });
+
+  return { owner, member, board, column, card, comment };
+}
+
+test("removing a member keeps their content but detaches its attribution", async () => {
+  const { owner, member, board, card, comment } = await boardWithMemberContent();
+
+  await removeMember({ boardId: board.id, userId: member.id, actorId: owner.id });
+
+  // The content survives — removal is not deletion (D5).
+  const cards = await listCards(board.id);
+  expect(cards.map((c) => c.id)).toEqual([card.id]);
+  const comments = await listComments(card.id);
+  expect(comments.map((c) => c.id)).toEqual([comment.id]);
+
+  // ...but nothing on the board still names them.
+  const [storedCard] = cards;
+  expect(storedCard.createdById).toBeNull();
+  expect(storedCard.assigneeId).toBeNull();
+  expect(comments[0].authorId).toBeNull();
+  // Which is what makes the thread render them as a former member.
+  expect(comments[0].author).toBeNull();
+});
+
+test("removal leaves the user account and their work on other boards alone", async () => {
+  const { owner, member, board } = await boardWithMemberContent();
+
+  // The same person is a member of a second board, with content there too.
+  const other = await createBoard({ name: "Other", ownerId: owner.id });
+  await db.insert(boardMembers).values({ boardId: other.id, userId: member.id, role: "member" });
+  const otherColumn = await createColumn({ boardId: other.id, name: "To Do", userId: owner.id });
+  const otherCard = await createCard({
+    boardId: other.id,
+    columnId: otherColumn.id,
+    title: "Elsewhere",
+    userId: member.id,
+  });
+  const otherComment = await addComment({
+    cardId: otherCard.id,
+    body: "Also mine",
+    userId: member.id,
+  });
+
+  await removeMember({ boardId: board.id, userId: member.id, actorId: owner.id });
+
+  // The account itself is untouched — this is a membership removal, not a delete.
+  const [stillThere] = await db.select().from(users).where(eq(users.id, member.id));
+  expect(stillThere?.id).toBe(member.id);
+
+  // And the other board's attribution is exactly as it was.
+  const [elsewhere] = await listCards(other.id);
+  expect(elsewhere.createdById).toBe(member.id);
+  const [stillMine] = await listComments(otherCard.id);
+  expect(stillMine.authorId).toBe(member.id);
+  expect(stillMine.id).toBe(otherComment.id);
 });
