@@ -113,6 +113,15 @@ export const verificationTokens = pgTable(
   (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })],
 );
 
+/**
+ * The constraint that ties a card's assignee to a membership of the card's own
+ * board (see `cards` below). Named here rather than inline because `db/cards.ts`
+ * recognises this exact constraint to tell "not a board member" apart from every
+ * other write failure — if the two spellings drifted, that refusal would surface
+ * as an unhandled error.
+ */
+export const ASSIGNEE_BOARD_MEMBER_FK = "cards_assignee_board_member_fk";
+
 /** A member's role on a board (D1). Owners govern; members do all content work. */
 export type BoardRole = "owner" | "member";
 
@@ -241,14 +250,19 @@ export const cards = pgTable(
     //
     // NOTE: the migration writes `ON DELETE SET NULL ("assignee_id")` — the
     // column-list form (Postgres 15+), which nulls only the assignee and leaves
-    // `board_id` alone. drizzle-kit can't express that column list, so it emits a
-    // bare `ON DELETE set null` covering *both* referencing columns, which would
-    // fail against `board_id`'s NOT NULL. If this constraint is ever regenerated,
-    // re-apply the column list by hand.
+    // `board_id` alone. drizzle-kit can't express that column list, so what it
+    // emits from the declaration below is a bare `ON DELETE set null` covering
+    // *both* referencing columns — a constraint that passes DDL and then fails
+    // every member removal on `board_id`'s NOT NULL. Two consequences:
+    // `db:push` must not be pointed at this table, and a regenerated migration
+    // needs the column list re-applied by hand. Neither this declaration nor
+    // drizzle's snapshot records the difference, so `db:generate` will report no
+    // diff either way — the test in db/assignment-membership.test.ts reads the
+    // delete action back out of `pg_constraint` and is what actually notices.
     foreignKey({
       columns: [table.boardId, table.assigneeId],
       foreignColumns: [boardMembers.boardId, boardMembers.userId],
-      name: "cards_assignee_board_member_fk",
+      name: ASSIGNEE_BOARD_MEMBER_FK,
     }).onDelete("set null"),
     // The referencing side of that FK: without it, every membership delete seq
     // scans `cards` to find the assignments it has to null out.

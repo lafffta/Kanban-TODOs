@@ -2,8 +2,10 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
 import { withUniquePosition, type PositionOptions } from "./ordering";
+import { FOREIGN_KEY_VIOLATION, isConstraintViolation } from "./pg-errors";
 import { requireBoardMember } from "./boards";
 import {
+  ASSIGNEE_BOARD_MEMBER_FK,
   columns,
   cards,
   comments,
@@ -217,23 +219,17 @@ export async function assignCard(input: {
 }
 
 /**
- * Whether a failed write is the assignee-membership foreign key refusing it,
- * rather than some other database error that must keep propagating. Postgres
- * reports a foreign key violation as SQLSTATE 23503 and names the constraint;
- * both are matched, because the code alone would also swallow the card's
- * `board_id` and `column_id` references failing. Drizzle wraps driver errors, so
- * the `cause` chain is walked rather than only the error it hands back.
+ * Whether a failed write is the assignee-membership foreign key refusing it. The
+ * constraint is named, not just the error code: a card also references its board
+ * and its column, and answering *those* `23503`s with "not a board member" would
+ * report a broken card as a rejected assignee.
  */
-function isAssigneeMembershipViolation(error: unknown): boolean {
-  // Bounded, so a self-referential `cause` can't spin here. Nothing legitimate
-  // nests a driver error more than a couple of wrappers deep.
-  let cursor = error;
-  for (let depth = 0; cursor instanceof Object && depth < 8; depth += 1) {
-    const { code, constraint } = cursor as { code?: unknown; constraint?: unknown };
-    if (code === "23503" && constraint === "cards_assignee_board_member_fk") return true;
-    cursor = Reflect.get(cursor, "cause");
-  }
-  return false;
+export function isAssigneeMembershipViolation(error: unknown): boolean {
+  return isConstraintViolation(
+    error,
+    FOREIGN_KEY_VIOLATION,
+    (constraint) => constraint === ASSIGNEE_BOARD_MEMBER_FK,
+  );
 }
 
 /**

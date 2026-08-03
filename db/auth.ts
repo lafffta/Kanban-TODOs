@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
 import { canonicalEmail, canonicalEmailSql } from "./email";
+import { UNIQUE_VIOLATION, isConstraintViolation } from "./pg-errors";
 import { users, type User } from "./schema";
 
 /** Public shape of a user — never carries the password hash. */
@@ -90,19 +91,17 @@ export type CreateAccountResult =
 const EMAIL_IDENTITY_INDEX = "users_email_canonical_unique";
 
 /**
- * Whether an error is Postgres refusing a second account for one address.
- * Drizzle wraps driver errors, so the whole `cause` chain is searched rather than
- * just the top error. A `23505` on some *other* constraint is deliberately not
- * matched — it would be reported to the user as "that email is taken", which
- * would be a lie and would bury the real fault.
+ * Whether an error is Postgres refusing a second account for one address. A
+ * `23505` on some *other* constraint is deliberately not matched — it would be
+ * reported to the user as "that email is taken", which would be a lie and would
+ * bury the real fault.
  */
 export function isDuplicateEmailViolation(err: unknown): boolean {
-  for (let e: unknown = err; e != null; e = (e as { cause?: unknown }).cause) {
-    if (typeof e !== "object") break;
-    const { code, constraint } = e as { code?: unknown; constraint?: unknown };
-    if (code === "23505" && constraint === EMAIL_IDENTITY_INDEX) return true;
-  }
-  return false;
+  return isConstraintViolation(
+    err,
+    UNIQUE_VIOLATION,
+    (constraint) => constraint === EMAIL_IDENTITY_INDEX,
+  );
 }
 
 /**

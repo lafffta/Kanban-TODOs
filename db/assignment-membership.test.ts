@@ -4,10 +4,16 @@ import { Client } from "pg";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { closeDb, db } from "./index";
 import { registerUser } from "./auth";
-import { boardMembers } from "./schema";
+import { ASSIGNEE_BOARD_MEMBER_FK, boardMembers } from "./schema";
 import { createBoard, listBoardMembers, removeMember } from "./boards";
 import { createColumn } from "./columns";
-import { AssigneeNotBoardMemberError, assignCard, createCard, listCards } from "./cards";
+import {
+  AssigneeNotBoardMemberError,
+  assignCard,
+  createCard,
+  isAssigneeMembershipViolation,
+  listCards,
+} from "./cards";
 
 // Concurrency test for the invariant "a card's assignee is a current member of
 // that card's board" (ticket 16). The sequential halves of the rule live in
@@ -108,6 +114,36 @@ async function waitForRowLockWait(timeoutMs = 3_000): Promise<void> {
     "Timed out waiting for a query to block on a row lock — the operations never raced.",
   );
 }
+
+test("the constraint nulls only the assignee when a membership goes", async () => {
+  // The migration hand-writes `ON DELETE SET NULL ("assignee_id")` — the
+  // column-list form — because drizzle-kit can only emit a bare `SET NULL` over
+  // both referencing columns, which would fail on `board_id`'s NOT NULL. Neither
+  // drizzle's schema nor its snapshot records that column list, so `drizzle-kit
+  // generate` will report no diff whatever the database actually holds. This is
+  // what notices if the constraint is ever regenerated without it.
+  const result = await db.execute<{ set_null_columns: string[] }>(sql`
+    select array_agg(attname::text order by attname) as set_null_columns
+    from pg_constraint
+    join pg_attribute on attrelid = conrelid and attnum = any(confdelsetcols)
+    where conname = ${ASSIGNEE_BOARD_MEMBER_FK}
+  `);
+  expect(result.rows[0]?.set_null_columns).toEqual(["assignee_id"]);
+});
+
+test("only the assignee-membership constraint is read as a rejected assignee", () => {
+  const violation = (constraint: string) =>
+    Object.assign(new Error("violates foreign key constraint"), {
+      code: "23503",
+      constraint,
+    });
+
+  expect(isAssigneeMembershipViolation(violation(ASSIGNEE_BOARD_MEMBER_FK))).toBe(true);
+  // A card also references its board and its column. Reporting one of those as a
+  // rejected assignee would dress a broken card up as ordinary user error.
+  expect(isAssigneeMembershipViolation(violation("cards_board_id_boards_id_fk"))).toBe(false);
+  expect(isAssigneeMembershipViolation(violation("cards_column_id_columns_id_fk"))).toBe(false);
+});
 
 test("a removal landing mid-assignment still leaves the card unassigned", async () => {
   const { owner, member, board, card } = await boardWithMemberAndCard();
