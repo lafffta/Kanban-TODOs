@@ -85,6 +85,17 @@ deliberately.
   come from the server", and a read carrying the marker is a *failed* read. Otherwise a
   poll the server never answered comes back 200 with a token that cannot have moved, and
   a board nobody is syncing looks current forever.
+  **Sign-out empties the device, and proves it.** Everything the offline app can open is
+  the signed-in user's, so sign-out clears the in-memory cache, its IndexedDB copy, the
+  last-board note and the worker's page/data caches — then *reads each one back*. An
+  attempt is not a result: a blocked `deleteDatabase` never errors, a worker that never
+  answers cannot be waited on, and another tab's persister will write the boards back
+  seconds later. So the other tabs are told first (`BroadcastChannel`) and let go of what
+  they hold, the page sweeps Cache Storage itself rather than asking the worker to, the
+  query store is *emptied* rather than deleted, and anything that can't be proven gone
+  keeps the session alive and is named on screen. Signing out over a device that still
+  holds the boards is the one outcome worth refusing: it looks done, and the next person
+  on a shared phone is who finds out otherwise.
 
 ---
 

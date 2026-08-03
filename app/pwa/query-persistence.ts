@@ -11,7 +11,7 @@ import type { PersistedClient, Persister } from "@tanstack/react-query-persist-c
  * string budget, and the write is off the main thread.
  */
 
-/** The database holding the dehydrated cache. Deleted on sign-out. */
+/** The database holding the dehydrated cache. Emptied on sign-out (ticket 19). */
 export const QUERY_CACHE_DB = "kanban-query-cache";
 const STORE_NAME = "cache";
 const ENTRY_KEY = "client";
@@ -60,6 +60,21 @@ export function shouldPersistQuery(query: PersistableQuery): boolean {
   return typeof root === "string" && PERSISTED_KEY_ROOTS.includes(root);
 }
 
+/**
+ * The device-side store the persisted cache lives in — the only part of this that
+ * needs a browser, and so the seam everything else is written against.
+ *
+ * Unlike the persister built on top of it, these operations *report*: sign-out has
+ * to know whether the board data is really gone (ticket 19), and a store that
+ * swallowed its own failures could only ever say "yes".
+ */
+export type PersistedCacheStore = {
+  read(): Promise<PersistedClient | undefined>;
+  write(client: PersistedClient): Promise<void>;
+  /** Empty the store, throwing if it couldn't be emptied. */
+  clear(): Promise<void>;
+};
+
 /** Open (or create) the cache database. */
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -94,6 +109,39 @@ async function withStore<T>(
 }
 
 /**
+ * The real store, on IndexedDB.
+ *
+ * Every call opens and closes its own connection. That looks wasteful and is the
+ * point: a connection held open blocks other tabs, and sign-out's clearing has to
+ * be able to run while several tabs are still up.
+ */
+export function indexedDbCacheStore(): PersistedCacheStore {
+  // A browser with no IndexedDB — or a server render, where this is evaluated
+  // too — never stored a board here, so there is nothing to read back and nothing
+  // to clear. That is not the same as a store that *errors*, which sign-out has to
+  // report: this one can be proven empty, because it was never written to.
+  if (typeof indexedDB === "undefined") {
+    return { read: async () => undefined, write: async () => {}, clear: async () => {} };
+  }
+
+  return {
+    read: () =>
+      withStore<PersistedClient | undefined>("readonly", (store) => store.get(ENTRY_KEY)),
+    write: async (client) => {
+      await withStore("readwrite", (store) => store.put(client, ENTRY_KEY));
+    },
+    clear: async () => {
+      await withStore("readwrite", (store) => store.clear());
+    },
+  };
+}
+
+/**
+ * A persister that can be switched off — see `stop`.
+ */
+export type StoppablePersister = Persister & { stop(): void };
+
+/**
  * The persister TanStack Query drives: it reads once on mount and writes after
  * every settled change.
  *
@@ -101,51 +149,43 @@ async function withStore<T>(
  * window on some browsers and can be evicted under storage pressure at any moment;
  * none of that is worth failing a render over, since the consequence is only that
  * this launch has no offline copy.
+ *
+ * `stop()` makes it inert, permanently. Sign-out calls it before it starts
+ * clearing, because this is the thing that would undo the clearing: the whole
+ * cache is rewritten after every change, so a query settling — or a component
+ * unmounting — while the device is being emptied would put the board straight
+ * back on it. There is no restart, since the only reason to stop is that this
+ * document's session is ending.
  */
-export function createIndexedDbPersister(): Persister {
+export function createPersister(store: PersistedCacheStore): StoppablePersister {
+  let stopped = false;
+
   return {
+    stop() {
+      stopped = true;
+    },
     async persistClient(client: PersistedClient) {
+      if (stopped) return;
       try {
-        await withStore("readwrite", (store) => store.put(client, ENTRY_KEY));
+        await store.write(client);
       } catch {
         // Storage refused or full — this change just isn't available offline.
       }
     },
     async restoreClient() {
+      if (stopped) return undefined;
       try {
-        return await withStore<PersistedClient | undefined>("readonly", (store) =>
-          store.get(ENTRY_KEY),
-        );
+        return await store.read();
       } catch {
         return undefined;
       }
     },
     async removeClient() {
       try {
-        await withStore("readwrite", (store) => store.delete(ENTRY_KEY));
+        await store.clear();
       } catch {
         // Nothing to remove, or nowhere to remove it from.
       }
     },
   };
-}
-
-/**
- * Drop the whole persisted cache. Called on sign-out: the boards it holds belong
- * to whoever was signed in, and on a shared device the next person must not be
- * able to open the app offline and read them.
- */
-export function deletePersistedQueries(): Promise<void> {
-  return new Promise((resolve) => {
-    try {
-      const request = indexedDB.deleteDatabase(QUERY_CACHE_DB);
-      // Resolve either way: a blocked delete (another tab still has it open) is
-      // not something the sign-out should wait on.
-      request.onsuccess = () => resolve();
-      request.onerror = () => resolve();
-      request.onblocked = () => resolve();
-    } catch {
-      resolve();
-    }
-  });
 }

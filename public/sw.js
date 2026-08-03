@@ -128,20 +128,17 @@ self.addEventListener("fetch", (event) => {
 });
 
 /**
- * Signing out drops the pages and API responses rendered for whoever was signed
- * in; on a shared device the next person must not be able to pull them back
- * offline. The shell survives — it is the same for everyone.
+ * Note on sign-out: clearing these caches is *not* this worker's job, and used to
+ * be. The page sweeps Cache Storage itself (`workerCachesArea`), because it is the
+ * same storage from either side and only one of the two ways can be checked: a
+ * `caches.delete` from the page answers and can be read back, while a message to a
+ * worker that is missing, still installing or wedged has no answer at all — so
+ * waiting on one either hangs the sign-out or, as it did here, gives up after a
+ * second and calls the device cleared (ticket 19). The page keeps the shell cache
+ * for the same reason the sweep here would have: it is identical for everyone.
  */
 self.addEventListener("message", (event) => {
   if (!event.data) return;
-  if (event.data.type === "CLEAR_CACHES") {
-    const cleared = deleteCaches((name) => name !== SHELL_CACHE);
-    event.waitUntil(cleared);
-    // Answer when it's actually gone, so sign-out can drop the session *after*
-    // the caches rather than racing them.
-    const [port] = event.ports;
-    if (port) void cleared.finally(() => port.postMessage({ type: "CACHES_CLEARED" }));
-  }
   if (event.data.type === "CACHE_PAGE" && typeof event.data.url === "string") {
     event.waitUntil(warmPage(event.data.url));
   }
