@@ -1,12 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type QueryKey,
-} from "@tanstack/react-query";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BoardMemberProfile } from "@/db/boards";
 import { useOnline } from "@/app/pwa/connection";
 import { useOfflineWriteGate } from "@/app/pwa/offline-write-gate";
@@ -20,21 +15,17 @@ import {
   type ThreadComment,
 } from "./board-data";
 import { createReconciler, type Reconciler } from "./reconciler";
+import {
+  runBoardWrite,
+  type ActionResult,
+  type BoardMutation,
+  type CachePatch,
+  type WriteCache,
+} from "./board-writes";
 
-/** What a board server action answers with: nothing, or why it refused. */
-export type ActionResult = { error?: string } | void | undefined;
-
-/** An optimistic edit to one cached query, applied before its write is sent. */
-export type CachePatch = {
-  queryKey: QueryKey;
-  update: (previous: unknown) => unknown;
-};
-
-/** A board write: what to show immediately, and the server action to send. */
-export type BoardMutation = {
-  patches?: CachePatch[];
-  action: () => Promise<ActionResult>;
-};
+// The write protocol lives in `board-writes.ts`, but every component reaches it
+// through this provider, so its vocabulary is re-exported from here.
+export type { ActionResult, BoardMutation, CachePatch };
 
 /** An optimistic edit to the cached board payload. */
 export function patchBoard(
@@ -102,10 +93,11 @@ export function useBoard(): BoardControls {
  * aggregate query per client per 4s, and the full read happens exactly when
  * something changed.
  *
- * **Writes.** Every mutation goes through `run`: cancel in-flight reads so none
- * lands on top of the edit, patch the cache so the change is on screen instantly,
- * send the action, roll the patch back if it throws, and invalidate on settle so
- * the server's version of events replaces the optimistic one.
+ * **Writes.** Every mutation goes through `run`, which applies `runBoardWrite`'s
+ * protocol: cancel in-flight reads so none lands on top of the edit, patch the
+ * cache so the change is on screen instantly, send the action, roll every patch
+ * back if it fails — thrown *or* refused with `{ error }` — and invalidate on
+ * settle so the server's version of events replaces the optimistic one.
  *
  * **Where they meet.** A poll that left the server before a local write can't
  * contain it, and applying it would visibly snap the card back. The `Reconciler`
@@ -176,43 +168,25 @@ export function BoardProvider({
     queryClient.invalidateQueries({ queryKey: boardKeys.board(boardId), exact: true });
   }, [polledVersion, board.version, boardId, queryClient]);
 
-  const mutation = useMutation({
-    mutationFn: (write: BoardMutation) => write.action(),
-    onMutate: async (write) => {
-      reconciler.begin();
-      const patches = write.patches ?? [];
-      // Stop reads that are already on the wire from landing on top of the patch.
-      await Promise.all(
-        [boardKeys.board(boardId), ...patches.map((patch) => patch.queryKey)].map((key) =>
-          queryClient.cancelQueries({ queryKey: key }),
-        ),
-      );
-      const previous = patches.map((patch) => ({
-        queryKey: patch.queryKey,
-        data: queryClient.getQueryData(patch.queryKey),
-      }));
-      for (const patch of patches) {
-        queryClient.setQueryData(patch.queryKey, patch.update);
-      }
-      return { previous };
-    },
-    onError: (_error, _write, context) => {
-      for (const entry of context?.previous ?? []) {
-        queryClient.setQueryData(entry.queryKey, entry.data);
-      }
-    },
-    onSettled: (_data, _error, write) => {
-      reconciler.end();
-      // The board key is a prefix of the version key, so this re-reads both and
-      // they can't drift apart.
-      queryClient.invalidateQueries({ queryKey: boardKeys.board(boardId) });
-      for (const patch of write.patches ?? []) {
-        queryClient.invalidateQueries({ queryKey: patch.queryKey });
-      }
-    },
-  });
+  // The protocol's view of the cache — see `runBoardWrite` for what it does with it.
+  const cache = useMemo<WriteCache>(
+    () => ({
+      // Stop reads that are already on the wire from landing on top of a patch.
+      cancel: (queryKey) => queryClient.cancelQueries({ queryKey }),
+      read: (queryKey) => queryClient.getQueryData(queryKey),
+      write: (queryKey, data) => {
+        queryClient.setQueryData(queryKey, data);
+      },
+      update: (queryKey, updater) => {
+        queryClient.setQueryData(queryKey, updater);
+      },
+      invalidate: (queryKey) => {
+        queryClient.invalidateQueries({ queryKey });
+      },
+    }),
+    [queryClient],
+  );
 
-  const { mutateAsync } = mutation;
   const run = useCallback(
     async (write: BoardMutation): Promise<ActionResult> => {
       // Offline is read-only (D8): refused before the optimistic patch is even
@@ -220,15 +194,9 @@ export function BoardProvider({
       const refused = refuseWhileOffline();
       if (refused) return { error: refused };
 
-      try {
-        return await mutateAsync(write);
-      } catch {
-        // A rejected action has already been rolled back; tell the caller so it
-        // can say so where the user is looking.
-        return { error: "That didn't save. Check your connection and try again." };
-      }
+      return runBoardWrite({ cache, reconciler, boardKey: boardKeys.board(boardId) }, write);
     },
-    [mutateAsync, refuseWhileOffline],
+    [boardId, cache, reconciler, refuseWhileOffline],
   );
 
   return (
