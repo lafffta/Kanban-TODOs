@@ -3,12 +3,15 @@
 import { useState } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { PersisterProvider } from "./pwa/offline-data";
 import {
   PERSIST_BUSTER,
   PERSIST_MAX_AGE_MS,
-  createIndexedDbPersister,
+  createPersister,
+  indexedDbCacheStore,
   shouldPersistQuery,
 } from "./pwa/query-persistence";
+import { SignedOutGate } from "./pwa/signed-out-gate";
 import { ToastProvider } from "./pwa/toast";
 
 /**
@@ -46,8 +49,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
       }),
   );
 
+  // Kept as its own value, not just handed to the provider: signing out has to be
+  // able to switch it off before it empties the device, or a query settling
+  // mid-clear would write the boards straight back (ticket 19).
+  const [persister] = useState(() => createPersister(indexedDbCacheStore()));
+
   const [persistOptions] = useState(() => ({
-    persister: createIndexedDbPersister(),
+    persister,
     maxAge: PERSIST_MAX_AGE_MS,
     buster: PERSIST_BUSTER,
     dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
@@ -55,7 +63,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
-      <ToastProvider>{children}</ToastProvider>
+      <PersisterProvider value={persister}>
+        <ToastProvider>
+          {/* Signing out in one tab has to empty the others too — including the
+              board still on their screens. */}
+          <SignedOutGate>{children}</SignedOutGate>
+        </ToastProvider>
+      </PersisterProvider>
     </PersistQueryClientProvider>
   );
 }

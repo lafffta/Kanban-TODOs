@@ -78,8 +78,35 @@ AUTH_TRUST_HOST=true npm start   # http://localhost:3000
   IndexedDB, so an offline launch opens on the board it last saw.
 
 Offline the board is read-only: writes are refused with a toast rather than
-queued (no background sync in v1). Signing out clears both the persisted cache
-and the worker's caches — they hold the signed-in user's boards.
+queued (no background sync in v1).
+
+#### Signing out clears the device
+
+Everything the offline app can open belongs to whoever was signed in, so
+sign-out empties it: the in-memory query cache, its IndexedDB copy, the
+last-board note and the pages the worker cached (`app/pwa/device-clearing.ts`).
+Every area is **read back afterwards**, and anything that can't be proven gone
+is named on screen with the session left up — a sign-out that leaves the boards
+on a shared phone is worse than one that visibly didn't finish. Other open tabs
+are told over a `BroadcastChannel` so they stop writing their cache back, and
+they put the board away rather than sit on a readable copy. The sign-in page
+sweeps once more on arrival (`app/pwa/leftover-sweep.tsx`), which catches a
+response the worker filed after the sign-out's last check.
+
+Verifying it by hand — the shared-device check, which the automated tests
+cannot stand in for:
+
+1. `npm run build && AUTH_TRUST_HOST=true npm start`, sign in, open a board and
+   let it load. Open a second tab on the same board.
+2. Sign out in the first tab. The second tab should replace the board with
+   "Signed out".
+3. In DevTools → Application, check **IndexedDB → kanban-query-cache** is empty,
+   **Local Storage** has no `kanban:last-board`, and **Cache Storage** has no
+   `kanban-pages-*` / `kanban-data-*` (only `kanban-shell-*`).
+4. Go offline (DevTools → Network → Offline) and relaunch the app. It must land
+   on the offline page or sign-in — never the previous account's board.
+5. Sign in as a second account and repeat: the first account's boards must not
+   be reachable from the device at any point.
 
 `AUTH_TRUST_HOST` is only needed for a local production run; Vercel sets it.
 

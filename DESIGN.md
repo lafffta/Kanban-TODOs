@@ -85,6 +85,25 @@ deliberately.
   come from the server", and a read carrying the marker is a *failed* read. Otherwise a
   poll the server never answered comes back 200 with a token that cannot have moved, and
   a board nobody is syncing looks current forever.
+  **Sign-out empties the device, and proves it.** Everything the offline app can open is
+  the signed-in user's, so sign-out clears the in-memory cache, its IndexedDB copy, the
+  last-board note and the worker's page/data caches — then *reads each one back*. An
+  attempt is not a result: a blocked `deleteDatabase` never errors, a worker that never
+  answers cannot be waited on, and another tab's persister will write the boards back
+  seconds later. So the other tabs are told first (`BroadcastChannel`) and let go of what
+  they hold, the page sweeps Cache Storage itself rather than asking the worker to, the
+  query store is *emptied* rather than deleted, and anything that can't be proven gone
+  keeps the session alive and is named on screen. Signing out over a device that still
+  holds the boards is the one outcome worth refusing: it looks done, and the next person
+  on a shared phone is who finds out otherwise.
+  Two deliberate softenings of "must not complete", both because the strict reading has
+  a worse failure than the one it prevents. A refused sign-out leaves the **session**
+  live on the shared phone — worse than a stale cached copy — so the failure offers an
+  explicit, consequence-named way out ("sign out and leave the copy on this device")
+  rather than trapping someone whose storage is broken. And because a request already
+  on the wire can be filed into a swept cache after the last read-back, the sign-in
+  page sweeps once more on arrival: no session there, so clearing is unconditionally
+  safe, and it closes the one window the sign-out can't see from where it stands.
 
 ---
 
