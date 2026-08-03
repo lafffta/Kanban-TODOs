@@ -39,6 +39,11 @@ const OFFLINE_URL = "/offline";
  * which is what puts the board into its "Not syncing" state. Without the marker a
  * failed poll is an HTTP 200 carrying a token that cannot have moved, and a board
  * nobody is syncing looks current forever (ticket 18).
+ *
+ * The name is declared canonically as `CACHED_RESPONSE_HEADER` in `board-data.ts`
+ * and repeated here because this file ships as a plain script and cannot import
+ * it. The worker's own tests import that constant, so the two cannot drift apart
+ * without a failure.
  */
 const CACHED_HEADER = "X-Kanban-Cached";
 

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
+import { CACHED_RESPONSE_HEADER } from "@/app/boards/[id]/board-data";
 
 // The rule the offline app rests on (D8): which requests the service worker may
 // answer from a cache, which must always reach the network, and — once it has
@@ -19,9 +20,6 @@ type Network = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respons
 
 const ORIGIN = "https://kanban.example";
 const SOURCE = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
-
-/** The marker the worker puts on anything it served instead of the network. */
-const CACHED_HEADER = "X-Kanban-Cached";
 
 const VERSION_PATH = "/api/boards/abc/version";
 const BOARD_PATH = "/api/boards/abc";
@@ -62,10 +60,6 @@ class FakeCache {
   async keys(): Promise<Request[]> {
     return [...this.entries.keys()].map((url) => new Request(url));
   }
-
-  async delete(request: RequestInfo): Promise<boolean> {
-    return this.entries.delete(urlOf(request));
-  }
 }
 
 /** Enough of `CacheStorage`, including the cross-cache `match`. */
@@ -88,14 +82,6 @@ class FakeCacheStorage {
       if (hit) return hit;
     }
     return undefined;
-  }
-
-  async keys(): Promise<string[]> {
-    return [...this.opened.keys()];
-  }
-
-  async delete(name: string): Promise<boolean> {
-    return this.opened.delete(name);
   }
 }
 
@@ -209,7 +195,8 @@ function get(path: string, mode = "cors"): RequestLike {
   return { method: "GET", url: `${ORIGIN}${path}`, mode };
 }
 
-const classify = startWorker(server({}).network).classify;
+// The classifier is pure, so any worker's copy of it answers the same.
+const { classify } = startWorker(server({}).network);
 
 // ---------------------------------------------------------------------------
 // Which strategy a request gets
@@ -274,7 +261,7 @@ test("a reachable server answers the poll itself, unmarked", async () => {
   const response = await worker.respondTo(get(VERSION_PATH));
 
   expect(await response.json()).toEqual({ version: "7" });
-  expect(response.headers.get(CACHED_HEADER)).toBe(null);
+  expect(response.headers.get(CACHED_RESPONSE_HEADER)).toBe(null);
 });
 
 test("with the server gone the last answer is still served, so an offline launch has data", async () => {
@@ -301,7 +288,7 @@ test("but every cached answer is marked, so a failed poll can't pass for a live 
   site.goDown();
   const response = await worker.respondTo(get(VERSION_PATH));
 
-  expect(response.headers.get(CACHED_HEADER)).toBe("1");
+  expect(response.headers.get(CACHED_RESPONSE_HEADER)).toBe("1");
 });
 
 test("a failed read with nothing cached stays a failure", async () => {
@@ -329,7 +316,7 @@ test("a reachable server takes over again, and its answer is unmarked", async ()
   const response = await worker.respondTo(get(VERSION_PATH));
 
   expect(await response.json()).toEqual({ version: "8" });
-  expect(response.headers.get(CACHED_HEADER)).toBe(null);
+  expect(response.headers.get(CACHED_RESPONSE_HEADER)).toBe(null);
 });
 
 test("a page load that fails opens the cached page rather than a browser error", async () => {
@@ -342,7 +329,7 @@ test("a page load that fails opens the cached page rather than a browser error",
 
   // The app opens, and says so: this document did not come from the server.
   expect(await response.text()).toBe("<html>the board</html>");
-  expect(response.headers.get(CACHED_HEADER)).toBe("1");
+  expect(response.headers.get(CACHED_RESPONSE_HEADER)).toBe("1");
 });
 
 test("a page that was never opened falls back to the offline page", async () => {
