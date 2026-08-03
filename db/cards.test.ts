@@ -157,6 +157,17 @@ test("assignCard rejects an assignee who is not a member of the board", async ()
   expect(still.assigneeId).toBeNull();
 });
 
+test("assignCard rejects an assignee who is not a user at all", async () => {
+  const { owner, board, column } = await makeBoardWithColumn();
+  const card = await createCard({ boardId: board.id, columnId: column.id, title: "Task", userId: owner.id });
+
+  // An id belonging to nobody is refused the same way a non-member is — the
+  // caller learns the assignee isn't on the board, not which of the two.
+  await expect(
+    assignCard({ cardId: card.id, assigneeId: crypto.randomUUID(), userId: owner.id }),
+  ).rejects.toBeInstanceOf(AssigneeNotBoardMemberError);
+});
+
 test("a removed user's cards survive with a null createdById (former member)", async () => {
   const { board, column } = await makeBoardWithColumn();
   const member = await addMember(board.id);

@@ -2,13 +2,14 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./index";
 import { withUniquePosition, type PositionOptions } from "./ordering";
+import { FOREIGN_KEY_VIOLATION, isConstraintViolation } from "./pg-errors";
 import { requireBoardMember } from "./boards";
 import {
+  ASSIGNEE_BOARD_MEMBER_FK,
   columns,
   cards,
   comments,
   users,
-  boardMembers,
   type BoardMember,
   type Card,
   type UserProfile,
@@ -187,6 +188,13 @@ export async function updateCard(input: {
  * Assign a card to a single board member, or clear the assignment with `null`.
  * The assignee must be a member of the card's board (D7); a non-member is rejected
  * with `AssigneeNotBoardMemberError`, leaving the card untouched.
+ *
+ * The membership isn't read first and checked here. A separate read would be a
+ * check-then-write: the member could be removed between the two statements and the
+ * update would still commit them as assignee. Instead the write itself is the
+ * check — `cards_assignee_board_member_fk` resolves the assignee against
+ * `board_members` as part of the update, so a concurrent removal either waits for
+ * this write and then clears it, or commits first and makes this write fail.
  */
 export async function assignCard(input: {
   cardId: string;
@@ -195,26 +203,33 @@ export async function assignCard(input: {
 }): Promise<Card> {
   const { card } = await requireCardMember(input.cardId, input.userId);
 
-  if (input.assigneeId !== null) {
-    const [member] = await db
-      .select({ userId: boardMembers.userId })
-      .from(boardMembers)
-      .where(
-        and(
-          eq(boardMembers.boardId, card.boardId),
-          eq(boardMembers.userId, input.assigneeId),
-        ),
-      )
-      .limit(1);
-    if (!member) throw new AssigneeNotBoardMemberError(card.boardId, input.assigneeId);
+  try {
+    const [updated] = await db
+      .update(cards)
+      .set({ assigneeId: input.assigneeId, updatedAt: new Date() })
+      .where(eq(cards.id, card.id))
+      .returning();
+    return updated;
+  } catch (error) {
+    if (input.assigneeId !== null && isAssigneeMembershipViolation(error)) {
+      throw new AssigneeNotBoardMemberError(card.boardId, input.assigneeId);
+    }
+    throw error;
   }
+}
 
-  const [updated] = await db
-    .update(cards)
-    .set({ assigneeId: input.assigneeId, updatedAt: new Date() })
-    .where(eq(cards.id, card.id))
-    .returning();
-  return updated;
+/**
+ * Whether a failed write is the assignee-membership foreign key refusing it. The
+ * constraint is named, not just the error code: a card also references its board
+ * and its column, and answering *those* `23503`s with "not a board member" would
+ * report a broken card as a rejected assignee.
+ */
+export function isAssigneeMembershipViolation(error: unknown): boolean {
+  return isConstraintViolation(
+    error,
+    FOREIGN_KEY_VIOLATION,
+    (constraint) => constraint === ASSIGNEE_BOARD_MEMBER_FK,
+  );
 }
 
 /**

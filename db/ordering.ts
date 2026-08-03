@@ -1,4 +1,5 @@
 import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing";
+import { UNIQUE_VIOLATION, isConstraintViolation } from "./pg-errors";
 
 /**
  * Fractional-index ordering (D3), shared by columns now and cards later. A row's
@@ -72,9 +73,6 @@ export class PositionCollisionError extends Error {
   }
 }
 
-/** Postgres' `unique_violation`. */
-const UNIQUE_VIOLATION = "23505";
-
 /**
  * The suffix every position index is named with (`columns_board_id_position_unique`,
  * `cards_column_id_position_unique`). Retrying is only ever the right answer for
@@ -85,26 +83,13 @@ const UNIQUE_VIOLATION = "23505";
 const POSITION_INDEX_SUFFIX = "_position_unique";
 
 /**
- * Whether an error is Postgres refusing a duplicate *position*. Drizzle wraps
- * driver errors, so the whole `cause` chain is searched rather than just the top
- * error. A `23505` on any other constraint is deliberately **not** matched.
+ * Whether an error is Postgres refusing a duplicate *position*. A `23505` on any
+ * other constraint is deliberately **not** matched.
  */
 export function isUniquePositionViolation(error: unknown): boolean {
-  for (let current = error, depth = 0; current != null && depth < 10; depth++) {
-    if (typeof current === "object" && "code" in current) {
-      const { code, constraint } = current as { code?: unknown; constraint?: unknown };
-      if (
-        code === UNIQUE_VIOLATION &&
-        typeof constraint === "string" &&
-        constraint.endsWith(POSITION_INDEX_SUFFIX)
-      ) {
-        return true;
-      }
-    }
-    if (typeof current !== "object" || !("cause" in current)) break;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return false;
+  return isConstraintViolation(error, UNIQUE_VIOLATION, (constraint) =>
+    constraint.endsWith(POSITION_INDEX_SUFFIX),
+  );
 }
 
 /**
