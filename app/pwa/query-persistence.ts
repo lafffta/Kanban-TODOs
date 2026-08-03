@@ -32,6 +32,7 @@ export const PERSIST_BUSTER = "board-v1";
 /** A cache entry, shaped the way TanStack Query hands it to the dehydrate filter. */
 type PersistableQuery = {
   queryKey: readonly unknown[];
+  /** `status` is the *last fetch's* outcome — deliberately not consulted below. */
   state: { status: string; data: unknown };
 };
 
@@ -42,11 +43,19 @@ const PERSISTED_KEY_ROOTS = ["board", "comments"];
  * Whether a cached read is written to IndexedDB.
  *
  * Persistence is opt-in by key root, so a query added later isn't silently stored
- * on someone's phone, and only settled reads that actually carry data qualify — a
- * failure must never be restored as though it were the board.
+ * on someone's phone, and only reads that actually carry data qualify — a failure
+ * must never be restored as though it were the board.
+ *
+ * The test is the data, not the *last* fetch's outcome. A query holds the payload
+ * it last read successfully even while a newer fetch is failing, and that payload
+ * is precisely what an offline launch needs. Keying on `status` instead would
+ * delete the device's copy at the worst possible moment: the whole snapshot is
+ * rewritten on every cache change, so a board unreachable for a few polls — which
+ * is now an error rather than a cached 200 (ticket 18) — would drop out of storage
+ * while the outage was still going on.
  */
 export function shouldPersistQuery(query: PersistableQuery): boolean {
-  if (query.state.status !== "success" || query.state.data === undefined) return false;
+  if (query.state.data === undefined) return false;
   const root = query.queryKey[0];
   return typeof root === "string" && PERSISTED_KEY_ROOTS.includes(root);
 }

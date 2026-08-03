@@ -86,10 +86,42 @@ export function serializeBoard(snapshot: BoardSnapshot): BoardData {
   };
 }
 
-/** Read a JSON endpoint, turning a non-2xx into a throw the query can surface. */
+/**
+ * The header the service worker sets on a response it answered out of its own
+ * cache rather than from the network.
+ *
+ * A cached copy is not evidence the server was reached, and the board's freshness
+ * rests entirely on that: an unchanged version token means nothing changed *only*
+ * if the server is the one that said so. So a read carrying this marker is a
+ * failed read — which is what raises the board's "Not syncing" notice instead of
+ * leaving a stale payload looking current (ticket 18).
+ *
+ * This is the canonical spelling of the name. `public/sw.js` ships as a plain
+ * script to the browser and so cannot import it — it repeats the literal, and the
+ * worker's tests import this constant to hold the two ends together.
+ */
+export const CACHED_RESPONSE_HEADER = "X-Kanban-Cached";
+
+/**
+ * Read a JSON endpoint, turning anything that isn't a live 2xx — a refusal, or a
+ * copy the offline cache answered with — into a throw the query can surface.
+ */
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, { signal });
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+
+  let failure: string | null = null;
+  if (!response.ok) failure = `Request failed: ${response.status}`;
+  else if (response.headers.has(CACHED_RESPONSE_HEADER)) {
+    failure = `Not live: ${url} was answered from the offline cache`;
+  }
+
+  if (failure !== null) {
+    // Nothing is going to read this body. Release it rather than leave the stream
+    // open until it is collected — a poll that keeps failing runs every 4s.
+    void response.body?.cancel();
+    throw new Error(failure);
+  }
+
   return (await response.json()) as T;
 }
 

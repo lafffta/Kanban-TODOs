@@ -29,6 +29,24 @@ const DATA_CACHE = `kanban-data-${VERSION}`;
 /** The page shown when a navigation fails and nothing for it was ever cached. */
 const OFFLINE_URL = "/offline";
 
+/**
+ * Set on every response this worker answers from a cache instead of the network.
+ *
+ * The worker cannot tell a device in airplane mode from a deployment that is down
+ * or a domain that stopped resolving: all three arrive as one rejected `fetch`. So
+ * it doesn't try to. It says only "this did not come from the server", and the app
+ * decides what that means — `board-data.ts` treats a marked read as a failed one,
+ * which is what puts the board into its "Not syncing" state. Without the marker a
+ * failed poll is an HTTP 200 carrying a token that cannot have moved, and a board
+ * nobody is syncing looks current forever (ticket 18).
+ *
+ * The name is declared canonically as `CACHED_RESPONSE_HEADER` in `board-data.ts`
+ * and repeated here because this file ships as a plain script and cannot import
+ * it. The worker's own tests import that constant, so the two cannot drift apart
+ * without a failure.
+ */
+const CACHED_HEADER = "X-Kanban-Cached";
+
 /** Precached at install, so they exist before the first failure. */
 const SHELL_ASSETS = ["/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
@@ -215,13 +233,28 @@ async function networkFirst(event, isNavigation) {
     return response;
   } catch (networkError) {
     const cached = await matchCached(cacheName, request, isNavigation);
-    if (cached) return cached;
+    if (cached) return markCached(cached);
     if (isNavigation) {
       const offline = await caches.match(OFFLINE_URL);
-      if (offline) return offline;
+      if (offline) return markCached(offline);
     }
+    // Nothing to fall back to, so the failure is the answer. It always was for
+    // this case; `markCached` is what makes the two above honest as well.
     throw networkError;
   }
+}
+
+/** The same response, marked as having come from a cache — see `CACHED_HEADER`. */
+function markCached(response) {
+  const headers = new Headers(response.headers);
+  headers.set(CACHED_HEADER, "1");
+  // Rebuilt rather than mutated: a Response's headers are immutable once it has
+  // one. The body is passed through as a stream, so nothing is buffered here.
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 /**
