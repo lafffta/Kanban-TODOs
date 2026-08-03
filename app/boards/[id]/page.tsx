@@ -23,8 +23,12 @@ import { MembersPanel } from "./members-panel";
 //
 // The board is read once here so the first paint needs no round trip, then handed
 // to `BoardProvider`, which polls it from `/api/boards/:id` from that point on
-// (ticket 09). The members panel below stays server-rendered: invites and roles are
-// owner-only governance, not the shared content the polling loop is for.
+// (ticket 09). Everything the board renders sits inside that provider, governance
+// included: a role is a row another owner can change mid-session, so the heading's
+// owner controls and the members panel read the viewer's standing from the polled
+// payload rather than from what was true at render (ticket 17). Only the pending
+// invites are still read here — their tokens are owner-only (D2/D6), so they can't
+// travel in a payload every member polls.
 export default async function BoardPage({
   params,
   searchParams,
@@ -52,51 +56,45 @@ export default async function BoardPage({
     // The board owns the viewport: the header and members panel keep their size
     // and the lanes take the rest, scrolling inside themselves (ticket 10).
     <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:gap-6 sm:p-6">
-      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
-        <div>
-          <Link href="/boards" className="text-sm opacity-60 hover:opacity-100">
-            ← Boards
-          </Link>
-          <BoardTitle boardId={id} name={snapshot.board.name} isOwner={isOwner} />
-        </div>
-        <Link
-          href={onlyMine ? `/boards/${id}` : `/boards/${id}?mine=1`}
-          className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
-            onlyMine
-              ? "border-transparent bg-black text-white dark:bg-white dark:text-black"
-              : "border-black/15 opacity-70 hover:opacity-100 dark:border-white/20"
-          }`}
-        >
-          {onlyMine ? "Showing my cards" : "My cards"}
-        </Link>
-      </div>
-
-      <MembersPanel
-        boardId={id}
-        members={snapshot.members}
-        invites={invites.map((invite) => ({
-          id: invite.id,
-          email: invite.email,
-          role: invite.role,
-          token: invite.token,
-          expiresAt: invite.expiresAt.toISOString(),
-        }))}
-        creatorId={snapshot.board.ownerId}
-        currentUserId={userId}
-        isOwner={isOwner}
-      />
-
-      {/* Where an offline launch comes back to, and the copy it opens (D8). */}
-      <RememberBoard boardId={id} name={snapshot.board.name} />
-      <OfflineCopyWarmer />
-
       <BoardProvider
         boardId={id}
         currentUserId={userId}
-        isOwner={isOwner}
         initialBoard={serializeBoard(snapshot)}
         renderedAt={Date.now()}
       >
+        <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
+          <div>
+            <Link href="/boards" className="text-sm opacity-60 hover:opacity-100">
+              ← Boards
+            </Link>
+            <BoardTitle boardId={id} name={snapshot.board.name} />
+          </div>
+          <Link
+            href={onlyMine ? `/boards/${id}` : `/boards/${id}?mine=1`}
+            className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+              onlyMine
+                ? "border-transparent bg-black text-white dark:bg-white dark:text-black"
+                : "border-black/15 opacity-70 hover:opacity-100 dark:border-white/20"
+            }`}
+          >
+            {onlyMine ? "Showing my cards" : "My cards"}
+          </Link>
+        </div>
+
+        <MembersPanel
+          invites={invites.map((invite) => ({
+            id: invite.id,
+            email: invite.email,
+            role: invite.role,
+            token: invite.token,
+            expiresAt: invite.expiresAt.toISOString(),
+          }))}
+        />
+
+        {/* Where an offline launch comes back to, and the copy it opens (D8). */}
+        <RememberBoard boardId={id} name={snapshot.board.name} />
+        <OfflineCopyWarmer />
+
         <BoardView filterAssigneeId={onlyMine ? userId : null} />
       </BoardProvider>
     </main>

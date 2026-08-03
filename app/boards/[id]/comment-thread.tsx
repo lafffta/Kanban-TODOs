@@ -10,6 +10,7 @@ import {
 } from "./board-data";
 import { isProvisional, provisionalId, withCommentCount } from "./board-edits";
 import { patchBoard, patchComments, useBoard } from "./board-context";
+import { canDeleteComment } from "./membership";
 import { Avatar, displayName } from "./avatar";
 import { addCommentAction, deleteCommentAction } from "./actions";
 
@@ -36,7 +37,7 @@ function formatWhen(iso: string): string {
  * write settles.
  */
 export function CommentThread({ cardId }: { cardId: string }) {
-  const { boardId, currentUserId, isOwner, members, run } = useBoard();
+  const { boardId, currentUserId, membership, run } = useBoard();
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -57,7 +58,7 @@ export function CommentThread({ cardId }: { cardId: string }) {
     setBody("");
     setPending(true);
 
-    const author = members.find((member) => member.id === currentUserId) ?? null;
+    const author = membership.self;
     const optimistic: ThreadComment = {
       id: provisionalId(),
       authorId: currentUserId,
@@ -99,7 +100,9 @@ export function CommentThread({ cardId }: { cardId: string }) {
     // A comment the server hasn't acknowledged has no id to delete by; the poll
     // that follows the post swaps in the real one a moment later.
     if (isProvisional(comment.id)) return false;
-    return isOwner || comment.authorId === currentUserId;
+    // Owner-or-author (D1), read from the live membership: someone demoted while
+    // this thread is open stops being offered other people's comments to delete.
+    return canDeleteComment(membership, comment.authorId);
   }
 
   return (

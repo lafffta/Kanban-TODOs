@@ -3,7 +3,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { closeDb, db } from "./index";
 import { registerUser } from "./auth";
 import { boardMembers } from "./schema";
-import { createBoard } from "./boards";
+import { changeMemberRole, createBoard } from "./boards";
 import { createColumn, renameColumn, reorderColumn, deleteColumn } from "./columns";
 import { assignCard, createCard, deleteCard, moveCard, updateCard } from "./cards";
 import { addComment, deleteComment } from "./comments";
@@ -203,6 +203,38 @@ test("a joining or leaving member moves the version", async () => {
         boardId: board.id,
         userId: joiner.id,
         role: "member",
+      }),
+    ),
+  ).toBe(true);
+});
+
+test("a promotion or demotion moves the version, though nobody joined or left", async () => {
+  const { owner, board } = await makeBoard();
+  const member = await makeUser();
+  await db
+    .insert(boardMembers)
+    .values({ boardId: board.id, userId: member.id, role: "member" });
+
+  // The case the member *count* cannot see: the same people, one of them now
+  // governing. Without it a promoted user keeps a member's UI until they reload.
+  expect(
+    await versionMovesWhen(board.id, () =>
+      changeMemberRole({
+        boardId: board.id,
+        userId: member.id,
+        role: "owner",
+        actorId: owner.id,
+      }),
+    ),
+  ).toBe(true);
+
+  expect(
+    await versionMovesWhen(board.id, () =>
+      changeMemberRole({
+        boardId: board.id,
+        userId: member.id,
+        role: "member",
+        actorId: owner.id,
       }),
     ),
   ).toBe(true);

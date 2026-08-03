@@ -28,7 +28,8 @@ import { assignCardAction, deleteCardAction, updateCardAction } from "./actions"
  * reconciles on settle (D3). Offline they are refused with a toast (D8).
  */
 export function CardSheet({ card, onClose }: { card: BoardCard; onClose: () => void }) {
-  const { boardId, members, online, run } = useBoard();
+  const { boardId, membership, online, run } = useBoard();
+  const { members } = membership;
   const [title, setTitle] = useState(card.title);
   const [description, setDescription] = useState(card.description);
   const [error, setError] = useState<string | null>(null);

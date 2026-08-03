@@ -148,6 +148,13 @@ export type NewBoard = typeof boards.$inferInsert;
  * A user's membership of a board, carrying their `role`. Composite PK
  * (`boardId + userId`) makes membership unique per board. Every board-scoped read
  * and mutation is gated by looking a row up here via `requireBoardMember`.
+ *
+ * `updatedAt` is bumped by every role change, and exists for the same reason
+ * `columns.updatedAt` does: a promotion or demotion moves nobody in or out, so
+ * neither the member count nor `createdAt` can see it, and the board's version
+ * token would sit still while what a viewer is *allowed to do* changed under them
+ * (D4). With it, a promoted member gains owner controls — and a demoted one loses
+ * them — on the next poll rather than on their next reload.
  */
 export const boardMembers = pgTable(
   "board_members",
@@ -160,6 +167,7 @@ export const boardMembers = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     role: text("role").$type<BoardRole>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (bm) => [primaryKey({ columns: [bm.boardId, bm.userId] })],
 );

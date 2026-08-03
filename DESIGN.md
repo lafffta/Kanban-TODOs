@@ -132,7 +132,8 @@ sessions         (Auth.js adapter — reserved; JWT strategy in v1)
 verificationTokens (Auth.js adapter)
 
 boards           id, name, ownerId → users, createdAt
-board_members    boardId → boards, userId → users, role, createdAt   [PK: boardId+userId]
+board_members    boardId → boards, userId → users, role, createdAt, updatedAt
+                 [PK: boardId+userId]
 columns          id, boardId → boards, name, position (TEXT, fractional index), createdAt
                  [UNIQUE: boardId+position]
 cards            id, boardId → boards, columnId → columns, title, description,
@@ -178,6 +179,17 @@ separate operations, so a membership read taken before the write can go stale be
 commits. The composite foreign key `cards (boardId, assigneeId) → board_members` refuses
 a non-member outright and, being `ON DELETE SET NULL (assigneeId)`, clears a departing
 member's assignments as part of the same delete — whichever order the two arrive in.
+
+A **role, though, is not a property of the session** — it is a row another owner can
+change while you are looking at the board. So the client never captures it at render:
+the polled board payload carries the members, and one `BoardMembership` projection is
+read out of it for every surface that renders people or offers a capability — the
+members panel, the assignee picker, the heading's owner controls, the comment thread's
+delete affordance. `board_members.updatedAt` is what gets the change there: a promotion
+moves no row count and creates no row, so without it the version token (D4) would sit
+still while what a viewer may do changed under them. This decides what the UI *offers*;
+`requireBoardMember` still decides what is *permitted*, against the row as it stands at
+the moment of the write.
 
 ---
 

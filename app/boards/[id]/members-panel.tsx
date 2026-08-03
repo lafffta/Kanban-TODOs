@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { BoardMemberProfile } from "@/db/boards";
 import type { BoardRole } from "@/db/schema";
 import { useOfflineWriteGate } from "@/app/pwa/offline-write-gate";
+import { useBoard } from "./board-context";
+import { canManageMember } from "./membership";
 import { Avatar, displayName } from "./avatar";
 import {
   changeMemberRoleAction,
@@ -77,30 +80,54 @@ function InviteLink({ link }: { link: string }) {
 }
 
 /**
+ * Refresh the server-rendered half of the board page when the viewer's own role
+ * changes under them (ticket 17).
+ *
+ * The polled payload carries the membership, so the panel's own controls follow a
+ * promotion or demotion by themselves. What it cannot carry is the *invite tokens*:
+ * they are owner-only (D2/D6), so `/api/boards/:id` — which every member reads —
+ * must never include them, and the page fetches them server-side under the role the
+ * viewer held at render. A newly promoted owner would otherwise see an empty
+ * pending-invite list until they reloaded. Re-running the server render is what
+ * fills it in, and is equally what drops it again on demotion.
+ *
+ * It watches the viewer's *own* role only, so a busy board's other promotions cost
+ * nothing. Should that role go to null — the viewer is off the board entirely — the
+ * re-render's `requireBoardMember` throws and `redirectOnBoardDenial` sends them to
+ * their boards list, which is the right end for someone who was removed.
+ */
+function useRefreshOnRoleChange(role: BoardRole | null): void {
+  const router = useRouter();
+  const previous = useRef(role);
+  useEffect(() => {
+    if (previous.current === role) return;
+    previous.current = role;
+    router.refresh();
+  }, [role, router]);
+}
+
+/**
  * The board's people, and — for an owner — the controls to change who they are
  * (D1: only owners invite, remove, and set roles). Inviting mints a link the owner
  * shares out-of-band; live links stay listed so they can be re-copied. Every
  * mutation routes through an owner-checked server action, so this panel decides
  * what to *offer*, never what is *permitted*.
  *
+ * Who is here, and whether the viewer governs them, are read from the board's live
+ * membership projection — the same one the assignee picker and the card sheet use
+ * (ticket 17). So an owner's promotion of a teammate reaches that teammate's own
+ * panel within a polling interval, and a demotion takes their controls away again,
+ * with no reload on either side. `invites` stays a server-rendered prop because
+ * tokens can't travel in the payload every member polls.
+ *
  * The board's creator is shown without controls: their owner row is what keeps the
  * board governed, so it can't be removed or demoted (D5 — no ownership transfer).
  */
-export function MembersPanel({
-  boardId,
-  members,
-  invites,
-  creatorId,
-  currentUserId,
-  isOwner,
-}: {
-  boardId: string;
-  members: BoardMemberProfile[];
-  invites: PendingInvite[];
-  creatorId: string;
-  currentUserId: string;
-  isOwner: boolean;
-}) {
+export function MembersPanel({ invites }: { invites: PendingInvite[] }) {
+  const { boardId, currentUserId, membership } = useBoard();
+  const { members, isOwner } = membership;
+  useRefreshOnRoleChange(membership.role);
+
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<BoardRole>("member");
   const [minted, setMinted] = useState<string | null>(null);
@@ -160,7 +187,7 @@ export function MembersPanel({
 
       <ul className="mt-3 space-y-2">
         {members.map((member) => {
-          const isCreator = member.id === creatorId;
+          const isCreator = member.id === membership.creatorId;
           return (
             <li key={member.id} className="flex items-center gap-2 text-sm">
               <Avatar user={member} size={24} />
@@ -171,7 +198,7 @@ export function MembersPanel({
                 )}
               </span>
 
-              {isOwner && !isCreator ? (
+              {canManageMember(membership, member.id) ? (
                 <>
                   <select
                     value={member.role}

@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { forgetBoard } from "@/app/pwa/offline-data";
 import { useOfflineWriteGate } from "@/app/pwa/offline-write-gate";
 import { boardKeys } from "./board-data";
+import { useBoard } from "./board-context";
 import { deleteBoardAction, renameBoardAction } from "./actions";
 
 /**
@@ -22,23 +23,22 @@ import { deleteBoardAction, renameBoardAction } from "./actions";
  * ever correct the copy the device is holding, including the one persisted to
  * IndexedDB (D8). Both writes therefore clear it here rather than leaving it to
  * the polling loop.
+ *
+ * Whether to offer them is read from the live membership rather than settled at
+ * render (ticket 17), so an owner demoted mid-session loses the board's lifecycle
+ * controls within a polling interval.
  */
-export function BoardTitle({
-  boardId,
-  name,
-  isOwner,
-}: {
-  boardId: string;
-  name: string;
-  isOwner: boolean;
-}) {
+export function BoardTitle({ boardId, name }: { boardId: string; name: string }) {
+  const { membership } = useBoard();
+  const isOwner = membership.isOwner;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const queryClient = useQueryClient();
-  // The header sits outside the board's query provider, so — like the members
-  // panel — it carries the offline gate itself: offline, every write is refused (D8).
+  // These are governance writes, not board content, so they don't go through the
+  // provider's `run` — they carry the offline gate themselves: offline, every write
+  // is refused (D8).
   const refuseWhileOffline = useOfflineWriteGate();
 
   const heading = <h1 className="mt-1 text-2xl font-semibold">{name}</h1>;
