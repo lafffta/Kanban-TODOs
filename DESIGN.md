@@ -137,7 +137,8 @@ columns          id, boardId → boards, name, position (TEXT, fractional index)
                  [UNIQUE: boardId+position]
 cards            id, boardId → boards, columnId → columns, title, description,
                  position (TEXT, fractional index),   [UNIQUE: columnId+position]
-                 assigneeId → users (nullable, must be board member),
+                 assigneeId (nullable), with
+                 (boardId, assigneeId) → board_members (ON DELETE SET NULL (assigneeId)),
                  createdById → users (ON DELETE SET NULL),
                  createdAt, updatedAt
 comments         id, cardId → cards,
@@ -171,7 +172,12 @@ say the address is taken or the credentials are wrong, never whose account it is
 **Access control:** every board/column/card/comment query is scoped by verifying
 the current user's membership. Centralize in a single seam:
 `requireBoardMember(boardId, userId, minRole?)` — used by every server action and
-route handler. Assignment sets validate the assignee is a member of the same board.
+route handler. An assignee must be a current member of the card's own board, which is
+a **database constraint**, not an application check: assignment and member removal are
+separate operations, so a membership read taken before the write can go stale before it
+commits. The composite foreign key `cards (boardId, assigneeId) → board_members` refuses
+a non-member outright and, being `ON DELETE SET NULL (assigneeId)`, clears a departing
+member's assignments as part of the same delete — whichever order the two arrive in.
 
 ---
 

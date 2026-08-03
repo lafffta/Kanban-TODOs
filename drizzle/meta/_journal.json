@@ -78,6 +78,13 @@
       "when": 1785699567320,
       "tag": "0010_normalized_email_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785718018904,
+      "tag": "0011_atomic_assignment_membership",
+      "breakpoints": true
     }
   ]
 }

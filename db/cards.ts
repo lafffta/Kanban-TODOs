@@ -8,7 +8,6 @@ import {
   cards,
   comments,
   users,
-  boardMembers,
   type BoardMember,
   type Card,
   type UserProfile,
@@ -187,6 +186,13 @@ export async function updateCard(input: {
  * Assign a card to a single board member, or clear the assignment with `null`.
  * The assignee must be a member of the card's board (D7); a non-member is rejected
  * with `AssigneeNotBoardMemberError`, leaving the card untouched.
+ *
+ * The membership isn't read first and checked here. A separate read would be a
+ * check-then-write: the member could be removed between the two statements and the
+ * update would still commit them as assignee. Instead the write itself is the
+ * check — `cards_assignee_board_member_fk` resolves the assignee against
+ * `board_members` as part of the update, so a concurrent removal either waits for
+ * this write and then clears it, or commits first and makes this write fail.
  */
 export async function assignCard(input: {
   cardId: string;
@@ -195,26 +201,39 @@ export async function assignCard(input: {
 }): Promise<Card> {
   const { card } = await requireCardMember(input.cardId, input.userId);
 
-  if (input.assigneeId !== null) {
-    const [member] = await db
-      .select({ userId: boardMembers.userId })
-      .from(boardMembers)
-      .where(
-        and(
-          eq(boardMembers.boardId, card.boardId),
-          eq(boardMembers.userId, input.assigneeId),
-        ),
-      )
-      .limit(1);
-    if (!member) throw new AssigneeNotBoardMemberError(card.boardId, input.assigneeId);
+  try {
+    const [updated] = await db
+      .update(cards)
+      .set({ assigneeId: input.assigneeId, updatedAt: new Date() })
+      .where(eq(cards.id, card.id))
+      .returning();
+    return updated;
+  } catch (error) {
+    if (input.assigneeId !== null && isAssigneeMembershipViolation(error)) {
+      throw new AssigneeNotBoardMemberError(card.boardId, input.assigneeId);
+    }
+    throw error;
   }
+}
 
-  const [updated] = await db
-    .update(cards)
-    .set({ assigneeId: input.assigneeId, updatedAt: new Date() })
-    .where(eq(cards.id, card.id))
-    .returning();
-  return updated;
+/**
+ * Whether a failed write is the assignee-membership foreign key refusing it,
+ * rather than some other database error that must keep propagating. Postgres
+ * reports a foreign key violation as SQLSTATE 23503 and names the constraint;
+ * both are matched, because the code alone would also swallow the card's
+ * `board_id` and `column_id` references failing. Drizzle wraps driver errors, so
+ * the `cause` chain is walked rather than only the error it hands back.
+ */
+function isAssigneeMembershipViolation(error: unknown): boolean {
+  // Bounded, so a self-referential `cause` can't spin here. Nothing legitimate
+  // nests a driver error more than a couple of wrappers deep.
+  let cursor = error;
+  for (let depth = 0; cursor instanceof Object && depth < 8; depth += 1) {
+    const { code, constraint } = cursor as { code?: unknown; constraint?: unknown };
+    if (code === "23503" && constraint === "cards_assignee_board_member_fk") return true;
+    cursor = Reflect.get(cursor, "cause");
+  }
+  return false;
 }
 
 /**

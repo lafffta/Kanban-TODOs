@@ -4,7 +4,6 @@ import { db } from "./index";
 import {
   boardMembers,
   boards,
-  cards,
   users,
   type Board,
   type BoardMember,
@@ -238,9 +237,14 @@ async function requireManageableMember(input: {
 
 /**
  * Remove a member from a board (owner-only, D1). Their cards and comments stay —
- * the board keeps its history (D5) — but their card *assignments* are cleared in
- * the same transaction, since `assignCard` only ever accepts a current member and a
- * stale assignee would show a non-member's avatar on the board.
+ * the board keeps its history (D5) — but their card *assignments* go, since a stale
+ * assignee would show a non-member's avatar on the board.
+ *
+ * Clearing those assignments is the one statement's own doing:
+ * `cards_assignee_board_member_fk` is `ON DELETE SET NULL (assignee_id)`, so the
+ * delete and the unassignment are the same atomic act. Clearing them here first
+ * would look equivalent but wouldn't be — an assignment committing between the two
+ * statements would survive the removal, which is exactly the race this replaced.
  */
 export async function removeMember(input: {
   boardId: string;
@@ -249,13 +253,7 @@ export async function removeMember(input: {
 }): Promise<void> {
   await requireManageableMember(input);
 
-  await db.transaction(async (tx) => {
-    await tx
-      .update(cards)
-      .set({ assigneeId: null })
-      .where(and(eq(cards.boardId, input.boardId), eq(cards.assigneeId, input.userId)));
-    await tx.delete(boardMembers).where(membershipOf(input.boardId, input.userId));
-  });
+  await db.delete(boardMembers).where(membershipOf(input.boardId, input.userId));
 }
 
 /**

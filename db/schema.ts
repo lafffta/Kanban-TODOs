@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
+  foreignKey,
+  index,
   integer,
   pgTable,
   primaryKey,
@@ -195,10 +197,12 @@ export type NewColumn = typeof columns.$inferInsert;
  * so cards render by `ORDER BY position` and a reorder rewrites one row (reorder
  * lands in the cards-drag ticket). `description` is plain multiline text — no
  * markdown, so no HTML-sanitization surface (D7). `assigneeId` is an optional
- * single board member (validated on assignment); `createdById` is `ON DELETE SET
- * NULL` so a removed member's cards survive as "former member" (D5). Deleting the
- * board or the parent column cascades the card; deleting a card cascades its
- * comments (the FK lands with the comments ticket).
+ * single board member — it has no direct reference to `users`, because
+ * `cards_assignee_board_member_fk` below already requires it to name a *membership*,
+ * which is the stronger claim; `createdById` is `ON DELETE SET NULL` so a removed
+ * member's cards survive as "former member" (D5). Deleting the board or the parent
+ * column cascades the card; deleting a card cascades its comments (the FK lands
+ * with the comments ticket).
  */
 export const cards = pgTable(
   "cards",
@@ -215,20 +219,40 @@ export const cards = pgTable(
     title: text("title").notNull(),
     description: text("description").notNull().default(""),
     position: text("position").notNull(),
-    assigneeId: text("assignee_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
+    assigneeId: text("assignee_id"),
     createdById: text("created_by_id").references(() => users.id, {
       onDelete: "set null",
     }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  // Two cards in one lane may never share a `position` — same reasoning as
-  // `columns` above. Scoped to the column, so the same key may recur in a
-  // different lane, which is exactly what a cross-column move relies on.
   (table) => [
+    // Two cards in one lane may never share a `position` — same reasoning as
+    // `columns` above. Scoped to the column, so the same key may recur in a
+    // different lane, which is exactly what a cross-column move relies on.
     uniqueIndex("cards_column_id_position_unique").on(table.columnId, table.position),
+    // An assignee must be a *current member of this card's board*. Expressed as a
+    // composite foreign key rather than an application check, because assignment
+    // and member removal are separate operations that can interleave: a check
+    // before the write can pass and go stale before the write commits. The
+    // reference makes the database hold both halves — assigning a non-member is
+    // refused outright, and removing a member clears their assignments as part of
+    // the same delete, taking the row locks that serialize the two (ticket 16).
+    //
+    // NOTE: the migration writes `ON DELETE SET NULL ("assignee_id")` — the
+    // column-list form (Postgres 15+), which nulls only the assignee and leaves
+    // `board_id` alone. drizzle-kit can't express that column list, so it emits a
+    // bare `ON DELETE set null` covering *both* referencing columns, which would
+    // fail against `board_id`'s NOT NULL. If this constraint is ever regenerated,
+    // re-apply the column list by hand.
+    foreignKey({
+      columns: [table.boardId, table.assigneeId],
+      foreignColumns: [boardMembers.boardId, boardMembers.userId],
+      name: "cards_assignee_board_member_fk",
+    }).onDelete("set null"),
+    // The referencing side of that FK: without it, every membership delete seq
+    // scans `cards` to find the assignments it has to null out.
+    index("cards_board_id_assignee_id_idx").on(table.boardId, table.assigneeId),
   ],
 );
 
